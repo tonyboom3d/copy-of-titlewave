@@ -428,6 +428,7 @@
         let uiState = null
         let lockedEditing = false
         let draftByRowKey = new Map() // rowKey -> partial fields
+        let baseItemsByRowKey = new Map()
 
         function postToHost(payload) {
             try {
@@ -446,19 +447,53 @@
         const termsCheckbox = document.getElementById('termsCheckbox');
         const saveButton = document.getElementById('saveButton');
 
-        termsCheckbox.addEventListener('change', function() {
-            if (this.checked) {
-                // Active state
-                saveButton.removeAttribute('disabled');
-                saveButton.classList.remove('bg-slate-200', 'text-slate-400', 'cursor-not-allowed');
-                saveButton.classList.add('bg-slate-900', 'text-white', 'hover:bg-slate-800', 'hover:shadow-md', 'hover:-translate-y-0.5', 'cursor-pointer');
+        function getBaseItem(rowKey) {
+            return baseItemsByRowKey.get(rowKey) || null
+        }
+
+        function buildMergedItem(item) {
+            const patch = draftByRowKey.get(item?.rowKey || '') || {}
+            return { ...(item || {}), ...patch }
+        }
+
+        function isItemDirty(item) {
+            const baseItem = getBaseItem(item?.rowKey || '')
+            const patch = draftByRowKey.get(item?.rowKey || '')
+            if (!baseItem || !patch) return false
+
+            return (
+                (patch.size ?? baseItem.size ?? '') !== (baseItem.size ?? '') ||
+                (patch.color ?? baseItem.color ?? '') !== (baseItem.color ?? '') ||
+                (patch.colorHex ?? baseItem.colorHex ?? '') !== (baseItem.colorHex ?? '') ||
+                (patch.image ?? baseItem.image ?? '') !== (baseItem.image ?? '') ||
+                (patch.nameNumber ?? baseItem.nameNumber ?? '') !== (baseItem.nameNumber ?? '')
+            )
+        }
+
+        function hasActualChanges() {
+            if (!uiState || !Array.isArray(uiState.items)) return false
+            return uiState.items.some(isItemDirty)
+        }
+
+        function refreshSaveButtonState() {
+            const canSave =
+                !!termsCheckbox.checked &&
+                !lockedEditing &&
+                !hostInit.isAdminMode &&
+                hasActualChanges()
+
+            if (canSave) {
+                saveButton.removeAttribute('disabled')
+                saveButton.classList.remove('bg-slate-200', 'text-slate-400', 'cursor-not-allowed')
+                saveButton.classList.add('bg-slate-900', 'text-white', 'hover:bg-slate-800', 'hover:shadow-md', 'hover:-translate-y-0.5', 'cursor-pointer')
             } else {
-                // Inactive state
-                saveButton.setAttribute('disabled', 'true');
-                saveButton.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed');
-                saveButton.classList.remove('bg-slate-900', 'text-white', 'hover:bg-slate-800', 'hover:shadow-md', 'hover:-translate-y-0.5', 'cursor-pointer');
+                saveButton.setAttribute('disabled', 'true')
+                saveButton.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed')
+                saveButton.classList.remove('bg-slate-900', 'text-white', 'hover:bg-slate-800', 'hover:shadow-md', 'hover:-translate-y-0.5', 'cursor-pointer')
             }
-        });
+        }
+
+        termsCheckbox.addEventListener('change', refreshSaveButtonState);
 
         // --- Live Timer Logic ---
         // Starts once we have createdDate from host.
@@ -562,19 +597,23 @@
             const items = Array.isArray(state?.items) ? state.items : []
             log('renderItemsTable', { itemCount: items.length })
             items.forEach((it) => {
+                const mergedItem = buildMergedItem(it)
                 const row = document.createElement('tr')
                 row.className = 'hover:bg-slate-50 transition-colors cursor-pointer group'
                 row.dataset.rowKey = it.rowKey || ''
 
-                const imgUrl = it.image || ''
-                const productName = it.productName || ''
-                const size = it.size || ''
-                const color = it.color || ''
-                const nameNumber = it.nameNumber || ''
+                const imgUrl = mergedItem.image || ''
+                const productName = mergedItem.productName || ''
+                const size = mergedItem.size || ''
+                const color = mergedItem.color || ''
+                const colorHex = mergedItem.colorHex || ''
+                const nameNumber = mergedItem.nameNumber || ''
+                const dirty = isItemDirty(it)
 
                 row.innerHTML = `
                     <td class="py-3 px-6">
-                        <div class="w-16 h-16 bg-slate-100 rounded mx-auto overflow-hidden border border-slate-200">
+                        <div class="relative w-16 h-16 bg-slate-100 rounded mx-auto overflow-hidden border border-slate-200">
+                            ${dirty ? `<span class="absolute top-1 right-1 z-10 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">Changed</span>` : ''}
                             ${imgUrl ? `<img src="${imgUrl}" alt="" class="w-full h-full object-cover opacity-90" onerror="this.style.display='none'">` : ''}
                         </div>
                     </td>
@@ -582,7 +621,7 @@
                     <td class="py-4 px-6 text-slate-800 border-l border-slate-200">${escapeHtml(size)}</td>
                     <td class="py-4 px-6 text-slate-800 border-l border-slate-200">
                         <div class="flex items-center justify-center gap-2">
-                            ${it.colorHex ? `<span class="inline-block w-4 h-4 rounded-full border border-slate-300 shadow-sm" style="background:${escapeHtml(it.colorHex)}"></span>` : ''}
+                            ${colorHex ? `<span class="inline-block w-4 h-4 rounded-full border border-slate-300 shadow-sm" style="background:${escapeHtml(colorHex)}"></span>` : ''}
                             <span>${escapeHtml(color)}</span>
                         </div>
                     </td>
@@ -625,6 +664,7 @@
         const modalColor = document.getElementById('modalColor');
         const modalColorSwatch = document.getElementById('modalColorSwatch');
         const modalNameNumber = document.getElementById('modalNameNumber');
+        const modalNameNumberGroup = modalNameNumber.parentElement;
         
         let currentRow = null;
         let originalSize = '';
@@ -703,6 +743,7 @@
 
         function openEditModal(item) {
             log('openEditModal', { rowKey: item?.rowKey, productName: item?.productName })
+            const mergedItem = buildMergedItem(item)
             currentRow = item
             originalSize = item.size || ''
             originalColor = item.color || ''
@@ -710,13 +751,19 @@
             originalImage = item.image || ''
             originalNameNum = item.nameNumber || ''
 
-            modalTitle.textContent = item.productName || ''
-            modalImg.src = item.image || ''
+            modalTitle.textContent = mergedItem.productName || ''
+            modalImg.src = mergedItem.image || ''
             modalImgContainer.className = 'w-24 h-24 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shadow-sm'
 
-            populateSizeDropdown(item)
-            populateColorDropdown(item)
-            modalNameNumber.value = item.nameNumber || ''
+            populateSizeDropdown(mergedItem)
+            populateColorDropdown(mergedItem)
+            modalNameNumber.value = mergedItem.nameNumber || ''
+
+            if ((item.nameNumber || '').toString().trim()) {
+                modalNameNumberGroup.classList.remove('hidden')
+            } else {
+                modalNameNumberGroup.classList.add('hidden')
+            }
 
             editModal.classList.remove('hidden')
             void editModal.offsetWidth
@@ -775,26 +822,37 @@
                 const selectedColorOption = !modalColorGroup.classList.contains('hidden')
                     ? modalColor.options[modalColor.selectedIndex]
                     : null
-                const patch = {
+                const nextValues = {
                     size: modalSize.value || '',
                     color: selectedColorOption ? (modalColor.value || '') : (currentRow.color || ''),
                     colorHex: selectedColorOption ? (selectedColorOption.dataset?.color || '') : (currentRow.colorHex || ''),
                     image: selectedColorOption
                         ? ((selectedColorOption.dataset?.image || '') || currentRow.image || '')
                         : (currentRow.image || ''),
-                    nameNumber: (modalNameNumber.value || '').trim()
+                    nameNumber: modalNameNumberGroup.classList.contains('hidden')
+                        ? (currentRow.nameNumber || '')
+                        : (modalNameNumber.value || '').trim()
                 }
-                log('modal save clicked', { rowKey, patch })
-                draftByRowKey.set(rowKey, { ...(draftByRowKey.get(rowKey) || {}), ...patch })
+                const baseItem = getBaseItem(rowKey) || currentRow
+                const patch = {}
+                ;['size', 'color', 'colorHex', 'image', 'nameNumber'].forEach(key => {
+                    if ((nextValues[key] || '') !== (baseItem?.[key] || '')) {
+                        patch[key] = nextValues[key]
+                    }
+                })
+
+                log('modal save clicked', { rowKey, patch, changedKeys: Object.keys(patch) })
+                if (Object.keys(patch).length) {
+                    draftByRowKey.set(rowKey, patch)
+                } else {
+                    draftByRowKey.delete(rowKey)
+                }
 
                 // optimistic update UI table
                 if (uiState && Array.isArray(uiState.items)) {
-                    const idx = uiState.items.findIndex(x => x.rowKey === rowKey)
-                    if (idx >= 0) {
-                        uiState.items[idx] = { ...uiState.items[idx], ...patch }
-                    }
                     renderItemsTable(uiState)
                 }
+                refreshSaveButtonState()
             }
             hideModal()
         })
@@ -843,7 +901,10 @@
                 })
             }
 
-            if (!changes.length) return
+            if (!changes.length) {
+                refreshSaveButtonState()
+                return
+            }
             log('save submitting changes', { changeCount: changes.length, rowKeys: changes.map(x => x.rowKey) })
 
             // Show status modal (loading)
@@ -943,23 +1004,19 @@
                     authModal.classList.add('hidden')
                     document.body.classList.remove('overflow-hidden')
                 }
+                refreshSaveButtonState()
                 return
             }
 
             if (d.type === HOST_TYPES.SET_STATE) {
                 log('received TW_SET_STATE')
                 uiState = d.state || null
+                baseItemsByRowKey = new Map((uiState?.items || []).map(item => [item.rowKey, { ...item }]))
                 if (uiState) {
                     setOrderMetaFromState(uiState)
                     renderItemsTable(uiState)
                 }
-
-                if (lockedEditing) {
-                    // hard-disable save regardless of checkbox
-                    saveButton.setAttribute('disabled', 'true')
-                    saveButton.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed')
-                    saveButton.classList.remove('bg-slate-900', 'text-white', 'hover:bg-slate-800', 'hover:shadow-md', 'hover:-translate-y-0.5', 'cursor-pointer')
-                }
+                refreshSaveButtonState()
 
                 // hide auth if we now have order number
                 if (uiState?.order?.number) {
@@ -995,6 +1052,7 @@
                     loadingState.classList.add('hidden')
                     successState.classList.remove('hidden')
                     draftByRowKey = new Map()
+                    refreshSaveButtonState()
                 } else {
                     // show failure as authError-style banner inside status modal (simple reuse)
                     loadingState.classList.add('hidden')
@@ -1009,10 +1067,7 @@
                 log('received TW_LOCK_EDITING', { locked: !!d.locked, reason: d.reason || '' })
                 lockedEditing = !!d.locked
                 if (lockedEditing) {
-                    // prevent saving
-                    saveButton.setAttribute('disabled', 'true')
-                    saveButton.classList.add('bg-slate-200', 'text-slate-400', 'cursor-not-allowed')
-                    saveButton.classList.remove('bg-slate-900', 'text-white', 'hover:bg-slate-800', 'hover:shadow-md', 'hover:-translate-y-0.5', 'cursor-pointer')
+                    refreshSaveButtonState()
                 }
                 return
             }
