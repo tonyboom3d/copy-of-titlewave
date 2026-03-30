@@ -1,0 +1,28 @@
+import wixData from 'wix-data'
+
+const COLLECTION = 'Stores/Orders'
+const FIELDS = ['_id','number','lineItems','paymentStatus','shippingInfo','customField','_updatedDate','buyerNote','_dateCreated','buyerInfo','totals','fulfillmentStatus']
+
+export async function fetchOrdersByIds(ids = []) {
+  if (!Array.isArray(ids) || ids.length === 0) return []
+  const uniq = Array.from(new Set(ids.map(String)))
+  const chunks = []
+  for (let i = 0; i < uniq.length; i += 100) chunks.push(uniq.slice(i, i + 100))
+  let found = []
+  for (const part of chunks) {
+    const page = await wixData.query(COLLECTION).hasSome('_id', part).limit(100).find({ suppressAuth: true, omitTotalCount: true })
+    if (Array.isArray(page.items) && page.items.length) found = found.concat(page.items)
+  }
+  
+  const byId = new Map(found.map(x => [String(x._id), x]))
+  const projected = uniq.map(id => {
+    const src = byId.get(String(id))
+    if (!src) return null
+    const o = {}
+    for (const k of FIELDS) if (src[k] !== undefined) o[k] = src[k]
+    return o
+  }).filter(Boolean)
+  return projected
+}
+
+

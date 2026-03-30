@@ -1,0 +1,354 @@
+import wixData from 'wix-data'
+import { fetch } from 'wix-fetch'
+import { fetchOrdersByIds } from 'backend/orders'
+
+const ORDERS_STATUS_COLLECTION = 'ordersStatus'
+const SHEET_HEADERS = ['Order number', 'Items', 'Color', 'Size', 'Team', 'NAME', 'Number', 'Recipient name', 'STATUS', 'Back office comment', 'Date Created', 'Last update', 'Edit Link']
+const DEFAULT_STATUS = 'Pending (24h)'
+
+export async function exportSelectedOrders(ids = [], sheetName = '', endpointUrl = '', decision = {}) {
+    const url0 = String(endpointUrl || '').trim()
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/(exec|dev)$/.test(url0)) {
+        return { ok: false, error: 'Invalid Web App URL' }
+    }
+
+    const sheetTitle = buildSheetTitle(sheetName)
+    const { headers, rows } = await prepareSheetRowsByIds(ids)
+
+    const bodyObj = { sheetTitle, headers, rows }
+    if (decision && typeof decision === 'object') {
+        if (decision.mode) bodyObj.mode = String(decision.mode) // 'overwrite' | 'rename'
+        if (decision.newTitle) bodyObj.newTitle = String(decision.newTitle)
+    }
+
+    async function postOnce(u) {
+        const res = await fetch(u, { method: 'post', headers: { 'Content-Type': 'application/json; charset=utf-8' }, body: JSON.stringify(bodyObj) })
+        const text = await res.text()
+        let json = null
+        try { json = JSON.parse(text) } catch (e) {}
+        return { status: res.status, text, json }
+    }
+
+    // 1st try
+    let { status, text, json } = await postOnce(url0)
+    if (json && (json.ok || json.needsDecision)) return json
+
+    // If this looks like the Drive HTML 405, try the other variant (exec <-> dev)
+    const looksDrive = status === 405 && (/<html/i.test(text) || /docs\.google\.com|drive\.google\.com/i.test(text))
+    if (looksDrive) {
+        const url1 = url0.endsWith('/exec') ? url0.replace(/\/exec$/, '/dev') : url0.replace(/\/dev$/, '/exec')
+        if (url1 !== url0) {
+            const r2 = await postOnce(url1)
+            if (r2.json && (r2.json.ok || r2.json.needsDecision)) return r2.json
+            // נעדיף להשיב את התוצאה השנייה אם יש
+            status = r2.status;
+            text = r2.text;
+            json = r2.json
+        }
+    }
+
+    // לא מפילים שגיאה ל־UI; נחזיר אובייקט רך לפולבאק בצד העמוד
+    return json || { ok: false, status, body: text }
+}
+
+export function buildSheetTitle(sheetName = '') {
+    return String(sheetName || '')
+        .replace(/[\/\u2044]/g, '-') // "/" ו-"⁄" -> "-"
+        .replace(/[\[\]\:\*\?\/\\]/g, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+        .slice(0, 90)
+}
+
+function normalizeStatus(s) {
+    const v = String(s || '').trim().toLowerCase()
+    if (!v) return DEFAULT_STATUS
+    if (v.startsWith('pending')) return 'Pending (24h)'
+    if (v.startsWith('approved')) return 'Approved'
+    if (v.startsWith('change')) return 'Waiting for Approval'
+    if (v.startsWith('cancel')) return 'Canceled'
+    if (v.includes('production')) return 'Sent to Production'
+    return s
+}
+
+function pickStatusText(rec) {
+    const raw = rec?.status ?? rec?.orderStatus ?? rec?.statusText ?? ''
+    const s = String(raw).trim()
+    return s ? normalizeStatus(s) : DEFAULT_STATUS
+}
+
+export async function prepareSheetRowsByIds(ids) {
+    const orders = await fetchOrdersByIds(ids)
+    const orderIds = Array.from(new Set(orders.map(o => String(o._id || '')).filter(Boolean)))
+    const orderNumbers = Array.from(new Set(orders.map(o => String(o.number || '')).filter(Boolean)))
+    const statusMap = await getStatusesByOrderKeys(orderIds, orderNumbers)
+    console.log("statusMap", statusMap);
+    const rows = []
+    const groupMap = new Map()
+
+    for (const o of orders) {
+        const bi = o?.buyerInfo || {}
+        const recip = [bi.firstName, bi.lastName].filter(Boolean).join(' ')
+        const dateCreated = formatMMDDYY_HHMMSS(o?._dateCreated)
+        const stRec = statusMap.get(String(o._id || '')) || statusMap.get(String(o.number || '')) || {}
+        const statusText = pickStatusText(stRec)
+        const lastUpdate = formatMMDDYY_HHMMSS(stRec._updatedDate || stRec.updatedAt || stRec._updatedAt)
+        // const stRec = statusMap.get(String(o._id || '')) || statusMap.get(String(o.number || '')) || {}
+        // const statusText = coerceText(stRec.status) || DEFAULT_STATUS
+        const backOfficeComment = coerceText(stRec.backOfficeComment)
+        // const lastUpdate = formatMMDDYY_HHMMSS(stRec._updatedDate)
+        const editLink = pickEditLink(stRec)
+
+        const items = Array.isArray(o?.lineItems) ? o.lineItems : []
+        console.log("statusText", statusText);
+        for (const li of items) {
+            const q = Number(li.quantity || 0) > 0 ? Number(li.quantity) : 1
+            const opts = Array.isArray(li.options) ? li.options : []
+            const ctf = Array.isArray(li.customTextFields) ? li.customTextFields : []
+
+            const color = pickOpt(opts, ['color', 'colour', 'colorway'])
+            const size = pickOpt(opts, ['size'])
+            const team = pickOpt(opts, ['team'])
+            const nameOpt = pickAnyName(opts, ctf)
+            const numberOpt = pickAnyNumber(opts, ctf, nameOpt)
+
+            const baseName = groupBaseName(li.name || '', team)
+
+            for (let i = 0; i < q; i++) {
+                const row = [
+                    String(o.number || ''),
+                    String(li.name || ''),
+                    String(color || ''),
+                    String(size || ''),
+                    String(team || ''),
+                    String(nameOpt?.name || ''),
+                    String(numberOpt?.number || ''),
+                    String(recip || ''),
+                    String(statusText || ''),
+                    String(backOfficeComment || ''),
+                    String(dateCreated || ''),
+                    String(lastUpdate || ''),
+                    String(editLink || '')
+                ]
+                if (!groupMap.has(baseName)) groupMap.set(baseName, [])
+                groupMap.get(baseName).push(row)
+            }
+        }
+    }
+
+    const sortedGroups = Array.from(groupMap.keys()).sort((a, b) => a.localeCompare(b))
+    for (const g of sortedGroups) {
+        const list = groupMap.get(g) || []
+        rows.push([`${list.length} ${g}`, '', '', '', '', '', '', '', '', '', '', '', ''])
+        for (const r of list) rows.push(r)
+    }
+
+    return { headers: SHEET_HEADERS, rows }
+}
+
+export async function sendRowsToGoogle(endpointUrl, sheetTitle, headers, rows) {
+    const url = String(endpointUrl || '').trim()
+    if (!/^https:\/\/script\.google\.com\/macros\/s\/[A-Za-z0-9_-]+\/(exec|dev)$/.test(url)) {
+        throw new Error('ENDPOINT_URL must be a Google Apps Script Web App URL ending with /exec')
+    }
+
+    const ping = await fetch(url, { method: 'get' })
+    const pingText = await ping.text()
+    let pingJson = null
+    try { pingJson = JSON.parse(pingText) } catch {}
+    if (!ping.ok || !(pingJson && pingJson.ok)) {
+        throw new Error(`Ping failed (${ping.status}). You are not hitting your Web App /exec. Body: ${pingText.slice(0,300)}`)
+    }
+
+    const body = JSON.stringify({ sheetTitle, headers, rows })
+    const res = await fetch(url, {
+        method: 'post',
+        headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        body
+    })
+    const text = await res.text()
+    let json = null
+    try { json = JSON.parse(text) } catch {}
+
+    if (json?.ok) return json
+
+    const looksLikeDriveHtml = /<html/i.test(text) || /docs\.google\.com|drive\.google\.com/i.test(text)
+    const hint = looksLikeDriveHtml ? 'This is a Drive page. Your URL is NOT the Web App /exec or it is a stale deployment.' : text.slice(0, 600)
+    throw new Error(`HTTP ${res.status}: ${hint}`)
+}
+
+function pickOpt(options, keys) {
+    const arr = Array.isArray(options) ? options : []
+    const k = keys.map(x => String(x).toLowerCase())
+    for (const o of arr) {
+        const name = String(o.option || '').toLowerCase()
+        if (k.some(s => name.includes(s))) return o.selection || ''
+    }
+    return ''
+}
+
+function pickAnyName(options, customTextFields) {
+    const arr = Array.isArray(options) ? options : []
+    for (const o of arr) {
+        const on = String(o.option || '').toLowerCase()
+        if (on.includes('name')) {
+            const v = String(o.selection || '').trim()
+            if (!v) continue
+            if (/\D/.test(v)) return { name: v }
+            else return { name: '' }
+        }
+    }
+    const ctf = Array.isArray(customTextFields) ? customTextFields : []
+    for (const f of ctf) {
+        const t = String(f.title || '').toLowerCase()
+        if (t.includes('name')) {
+            const v = String(f.value || '').trim()
+            if (!v) continue
+            if (/\D/.test(v)) return { name: v }
+            else return { name: '' }
+        }
+    }
+    return { name: '' }
+}
+
+function pickAnyNumber(options, customTextFields, namePicked) {
+    const arr = Array.isArray(options) ? options : []
+    for (const o of arr) {
+        const on = String(o.option || '').toLowerCase()
+        if (on.includes('number')) {
+            const v = String(o.selection || '').trim()
+            if (!v) continue
+            if (/^\d+$/.test(v)) return { number: v }
+        }
+    }
+    const ctf = Array.isArray(customTextFields) ? customTextFields : []
+    for (const f of ctf) {
+        const t = String(f.title || '').toLowerCase()
+        if (t.includes('number')) {
+            const v = String(f.value || '').trim()
+            if (/^\d+$/.test(v)) return { number: v }
+        }
+    }
+    if (namePicked && namePicked.name && /^\d+$/.test(namePicked.name)) return { number: namePicked.name }
+    return { number: '' }
+}
+
+function groupBaseName(itemName, team) {
+    const n = String(itemName || '')
+    const t = String(team || '').trim()
+    if (!t) return n.trim()
+    const low = n.toLowerCase()
+    const tlow = t.toLowerCase()
+    if (low.startsWith(tlow)) {
+        const rest = n.slice(t.length).replace(/^[\s\-–:]+/, '')
+        return rest.trim() || n.trim()
+    }
+    return n.trim()
+}
+
+async function getStatusesByOrderKeys(orderIds = [], orderNumbers = []) {
+    const ids = Array.from(new Set(orderIds.map(String).filter(Boolean)))
+    const nums = Array.from(new Set(orderNumbers.map(n => Number(n)).filter(n => !isNaN(n))))
+    const chunks = a => { const r = []; for (let i = 0; i < a.length; i += 100) r.push(a.slice(i, i + 100)); return r }
+    const out = new Map()
+
+    // 1) לפי orderId (מחרוזת)
+    for (const part of chunks(ids)) {
+        const page = await wixData.query(ORDERS_STATUS_COLLECTION)
+            .hasSome('orderId', part)
+            .limit(100).find({ suppressAuth: true, omitTotalCount: true })
+        const items = Array.isArray(page.items) ? page.items : []
+        for (const it of items) {
+            const kId = it.orderId != null ? String(it.orderId) : ''
+            const kNum = it.orderNumber != null ? String(it.orderNumber) : ''
+            if (kId) out.set(kId, it)
+            if (kNum) out.set(kNum, it)
+        }
+    }
+
+    // 2) לפי orderNumber (מספר)
+    for (const part of chunks(nums)) {
+        const page = await wixData.query(ORDERS_STATUS_COLLECTION)
+            .hasSome('orderNumber', part) // <-- שדה נכון
+            .limit(100).find({ suppressAuth: true, omitTotalCount: true })
+        const items = Array.isArray(page.items) ? page.items : []
+        for (const it of items) {
+            const kId = it.orderId != null ? String(it.orderId) : ''
+            const kNum = it.orderNumber != null ? String(it.orderNumber) : ''
+            if (kId && !out.has(kId)) out.set(kId, it)
+            if (kNum) out.set(kNum, it)
+        }
+    }
+
+    return out
+}
+
+// async function getStatusesByOrderKeys(orderIds, orderNumbers) {
+//     const idsText = Array.from(new Set((orderIds || []).map(String).filter(Boolean)))
+//     const numsStr = Array.from(new Set((orderNumbers || []).map(String).filter(Boolean)))
+//     const numsNum = Array.from(new Set(numsStr.map(x => Number(x)).filter(n => !isNaN(n))))
+//     const chunks = a => { const r = []; for (let i = 0; i < a.length; i += 100) r.push(a.slice(i, i + 100)); return r }
+//     const out = new Map()
+
+//     async function runQuery(values, num) {
+//         if (!values.length) return
+//         for (const part of chunks(values)) {
+//             const page = await wixData.query(ORDERS_STATUS_COLLECTION).hasSome('orderId', part).limit(100).find({ suppressAuth: true, omitTotalCount: true })
+//             const items = Array.isArray(page.items) ? page.items : []
+//             console.log(`${num}items2`, items);
+//             for (const it of items) {
+//                 const k1 = it.orderId != null ? String(it.orderId) : ''
+//                 const k2 = it.orderNumber != null ? String(it.orderNumber) : ''
+//                 const k3 = it.orderStatus != null ? String(it.orderStatus) : null
+//                 if (k1) out.set(k1, it)
+//                 if (k2) out.set(k2, it)
+//                 if (k3) out.set(k3, it)
+//             }
+//         }
+//     }
+
+//     await runQuery(idsText, "1")
+//     await runQuery(numsStr, "2")
+//     await runQuery(numsNum, "3")
+
+//     return out
+// }
+
+function formatMMDDYY_HHMMSS(value) {
+    if (!value) return ''
+    const d = new Date(value)
+    if (isNaN(d.getTime())) return ''
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    const dd = String(d.getDate()).padStart(2, '0')
+    const yy = String(d.getFullYear()).slice(-2)
+    const hh = String(d.getHours()).padStart(2, '0')
+    const mi = String(d.getMinutes()).padStart(2, '0')
+    const ss = String(d.getSeconds()).padStart(2, '0')
+    return `${mm}/${dd}/${yy} ${hh}:${mi}:${ss}`
+}
+
+function coerceText(v) {
+    if (v == null) return ''
+    if (typeof v === 'string') return v
+    if (typeof v === 'number') return String(v)
+    if (Array.isArray(v)) return v.join(', ')
+    if (typeof v === 'object') return v.title || v.name || v.label || v.value || String(v._id || '')
+    return String(v)
+}
+
+function ensureAbsoluteLink(link) {
+    const v = String(link || '').trim()
+    if (!v) return ''
+    if (/^https?:\/\//i.test(v)) return v
+    const path = v.replace(/^https?:\/\/[^/]+/i, '').replace(/^\/+/, '')
+    return `https://www.titlewavesports.com/${path}`
+}
+
+function pickEditLink(o) {
+    const raw =
+        o['link-ordersStatus-orderId'] ||
+        o['link-orders-status-orderId'] ||
+        o['link-ordersStatus-title'] ||
+        o.editLink || ''
+    return ensureAbsoluteLink(raw)
+}
