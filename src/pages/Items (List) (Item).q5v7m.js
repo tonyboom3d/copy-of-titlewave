@@ -1,1106 +1,490 @@
-import wixWindow from 'wix-window'
 import wixLocation from 'wix-location'
-import { getFilteredProductOptions } from 'backend/editLogics.web'
-import { updateOrderLineItems } from 'backend/orderUpdates.web'
-import { getOrderForAdmin } from 'backend/editLogics.web'
-import { verifyOrderAndStatus } from 'backend/editLogics.web'
 import { authentication } from 'wix-members-frontend'
+import { getOrderForAdmin, verifyOrderAndStatus } from 'backend/editLogics.web'
+import { updateOrderLineItems } from 'backend/orderUpdates.web'
 import { checkMemberRoles } from 'backend/adminAuth.web'
+
+const IFRAME_URL = 'https://tonyboom3d.github.io/copy-of-titlewave/'
+const IFRAME_ORIGIN = 'https://tonyboom3d.github.io'
+const UI_HTML_ID = '#counter'
+
+const LOG_NS = '[TW order iframe]'
+
+function log(...args) {
+    console.log(LOG_NS, ...args)
+}
+
+/** For logs only — avoids printing full email in console */
+function maskEmail(email) {
+    const s = (email || '').toString().trim()
+    if (!s) return '(empty)'
+    const at = s.indexOf('@')
+    if (at < 1) return `${s.slice(0, 2)}…`
+    const local = s.slice(0, at)
+    const domain = s.slice(at + 1)
+    return `${local.slice(0, 2)}…@${domain}`
+}
+
+/** For logs only */
+function maskOrderRef(orderNumber) {
+    const s = (orderNumber || '').toString().trim()
+    if (!s.length) return '(empty)'
+    if (s.length <= 4) return '…' + s.slice(-2)
+    return `…${s.slice(-4)}`
+}
+
+function summarizeOutboundMessage(message) {
+    if (!message || typeof message !== 'object') return message
+    const { type, state, ...rest } = message
+    if (type === 'TW_SET_STATE' && state) {
+        return {
+            type,
+            orderNumber: state.order?.number,
+            orderStatus: state.order?.status,
+            itemCount: Array.isArray(state.items) ? state.items.length : 0,
+            permissions: state.permissions,
+            createdDate: state.order?.createdDate
+        }
+    }
+    if (type === 'TW_INIT') {
+        return { type, orderId: rest.orderId ?? message.orderId, isAdminMode: rest.isAdminMode ?? message.isAdminMode }
+    }
+    return { type, ...rest }
+}
+
+function summarizeInboundData(data) {
+    if (!data || typeof data !== 'object') return data
+    const t = data.type
+    if (t === 'TW_AUTH_SUBMIT') {
+        return {
+            type: t,
+            email: maskEmail(data.email),
+            orderNumber: maskOrderRef(data.orderNumber)
+        }
+    }
+    if (t === 'TW_SAVE_SUBMIT') {
+        const changes = Array.isArray(data.changes) ? data.changes : []
+        return {
+            type: t,
+            changeCount: changes.length,
+            rowKeys: changes.map(c => (c && c.rowKey) ? String(c.rowKey) : '?').slice(0, 20)
+        }
+    }
+    return { type: t }
+}
 
 const norm = x => Array.isArray(x) ? x : []
 const lower = x => (x || '').toString().toLowerCase()
 const textOr = (a, b) => a || b || ''
-const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`
-const n = x => (x || '').toString()
-
-let editState = new Map()
-
-// --- GitHub Pages iframe (UI only) ---
-// Served from repo docs/ → https://tonyboom3d.github.io/copy-of-titlewave/
-const IFRAME_URL = 'https://tonyboom3d.github.io/copy-of-titlewave/'
-const IFRAME_ORIGIN = 'https://tonyboom3d.github.io'
-const UI_HTML_ID = '#counter' // currently reusing existing HTMLComponent; can be swapped to a dedicated one later.
+const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 
 let uiHtml = null
 let currentOrderId = ''
 let currentOrder = null
-let sessionItemsByRowKey = new Map() // rowKey -> { itemId, baseRow }
+let currentIsAdminMode = false
 
-const descName = d => textOr(d?.name?.translated, d?.name?.original)
-const descVal = d => textOr(
-    d?.plainTextValue?.translated,
-    textOr(d?.plainText?.translated, textOr(d?.plainTextValue?.original, d?.plainText?.original))
-)
+function postToUi(message) {
+    if (!uiHtml) {
+        log('postToUi skipped — no HTML component', summarizeOutboundMessage(message))
+        return
+    }
+    log('→ iframe', summarizeOutboundMessage(message))
+    uiHtml.postMessage(message, IFRAME_ORIGIN)
+}
 
-const extractSize = lines => {
+function descName(descLine) {
+    return textOr(descLine?.name?.translated, descLine?.name?.original)
+}
+
+function descVal(descLine) {
+    return textOr(
+        descLine?.plainTextValue?.translated,
+        textOr(
+            descLine?.plainText?.translated,
+            textOr(descLine?.plainTextValue?.original, descLine?.plainText?.original)
+        )
+    )
+}
+
+function extractSize(lines) {
     if (!Array.isArray(lines)) return ''
-    const hit = lines.find(x => lower(descName(x)).includes('size'))
+    const hit = lines.find(line => lower(descName(line)).includes('size'))
     return hit ? descVal(hit) : ''
 }
 
-const extractColor = lines => {
+function extractColor(lines) {
     if (!Array.isArray(lines)) return ''
-    const hit = lines.find(x => x?.lineType === 'COLOR' || lower(descName(x)).includes('color'))
+    const hit = lines.find(line => line?.lineType === 'COLOR' || lower(descName(line)).includes('color'))
     if (!hit) return ''
     return textOr(hit?.colorInfo?.original, hit?.colorInfo?.translated) || (hit?.color || '')
 }
 
-const extractNameNumber = lines => {
+function extractNameNumber(lines) {
     if (!Array.isArray(lines)) return ''
-    const hit = lines.find(x => {
-        const nm = lower(descName(x))
-        return nm.includes('name') || nm.includes('number')
+    const hit = lines.find(line => {
+        const name = lower(descName(line))
+        return name.includes('name') || name.includes('number')
     })
     return hit ? descVal(hit) : ''
 }
 
-const wixImageToStatic = url => {
+function wixImageToStatic(url) {
     if (!url || typeof url !== 'string') return ''
     if (!url.startsWith('wix:image://')) return url
+
     const base = url.split('#')[0]
-    const after = base.startsWith('wix:image://v1/') ? base.slice('wix:image://v1/'.length) : base.replace('wix:image://', '')
+    const after = base.startsWith('wix:image://v1/')
+        ? base.slice('wix:image://v1/'.length)
+        : base.replace('wix:image://', '')
     const mediaId = after.split('/')[0]
+
     return `https://static.wixstatic.com/media/${mediaId}`
 }
 
-const extractImageUrl = img => {
-    if (!img) return ''
-    if (typeof img === 'string') return wixImageToStatic(img)
-    if (img.uri) return img.uri
-    if (img.url) return img.url
+function extractImageUrl(image) {
+    if (!image) return ''
+    if (typeof image === 'string') return wixImageToStatic(image)
+    if (image.uri) return image.uri
+    if (image.url) return image.url
     return ''
 }
 
-const buildRows = items => {
-    if (!Array.isArray(items)) return []
+function buildRows(lineItems) {
+    if (!Array.isArray(lineItems)) return []
+
     const rows = []
-    items.forEach((li, idx) => {
-        const d = li?.descriptionLines || []
-        const base = {
-            product_id: li?.catalogReference?.catalogItemId || li?.rootCatalogItemId || '',
-            product_image: extractImageUrl(li?.image),
-            product_name: textOr(li?.productName?.translated, li?.productName?.original),
-            product_size: extractSize(d),
-            product_color: extractColor(d),
-            product_color_hex: '',
-            name_number: extractNameNumber(d)
+
+    lineItems.forEach((lineItem, itemIndex) => {
+        const descriptionLines = lineItem?.descriptionLines || []
+        const baseRow = {
+            productId: lineItem?.catalogReference?.catalogItemId || lineItem?.rootCatalogItemId || '',
+            image: extractImageUrl(lineItem?.image),
+            productName: textOr(lineItem?.productName?.translated, lineItem?.productName?.original),
+            size: extractSize(descriptionLines),
+            color: extractColor(descriptionLines),
+            colorHex: '',
+            nameNumber: extractNameNumber(descriptionLines)
         }
-        const qty = Math.max(1, Number(li?.quantity) || 1)
-        for (let i = 0; i < qty; i++) rows.push({ ...base, _rowKey: `${idx}-${i}` }) // ✅ מתחיל מ-0
+
+        const quantity = Math.max(1, Number(lineItem?.quantity) || 1)
+        for (let quantityIndex = 0; quantityIndex < quantity; quantityIndex++) {
+            rows.push({
+                itemId: `${itemIndex}-${quantityIndex}`,
+                rowKey: `${itemIndex}-${quantityIndex}`,
+                ...baseRow
+            })
+        }
     })
+
     return rows
 }
 
-const toDropdownOptions = arr => (arr || []).map(c => ({
-    label: c.description || c.value || '',
-    value: c.value || ''
-}))
+function formatAddress(address) {
+    if (!address) return ''
 
-function postToUi(msg) {
-    if (!uiHtml) return
-    try {
-        uiHtml.postMessage(msg, IFRAME_ORIGIN)
-    } catch (e) {
-        console.error('postToUi failed:', e)
-    }
+    const street = [address?.streetAddress?.name, address?.streetAddress?.number].filter(Boolean).join(' ')
+    const apt = address?.streetAddress?.apt ? `Apt ${address.streetAddress.apt}` : ''
+    const city = address?.city || ''
+    const country = address?.country || ''
+    const postalCode = address?.postalCode || ''
+
+    return [street, apt, city, country, postalCode].filter(Boolean).join(', ')
+}
+
+function isEditingAllowed(order, isAdminMode) {
+    if (isAdminMode) return false
+
+    const status = (order?.orderStatus || '').toString().toLowerCase()
+    return status === '' || status === 'pending' || status === 'pending (24h)'
 }
 
 function orderToUiState(order, { isAdminMode = false } = {}) {
-    const o = order || {}
-    const rows = buildRows(o?.lineItems || [])
-
-    sessionItemsByRowKey = new Map()
-
-    const uiItems = rows.map(r => {
-        const itemId = uid()
-        const rowKey = r._rowKey || uid()
-        const base = {
-            itemId,
-            rowKey,
-            productId: r.product_id || '',
-            productName: r.product_name || '',
-            image: extractImageUrl(r.product_image) || '',
-            size: r.product_size || '',
-            color: r.product_color || '',
-            colorHex: r.product_color_hex || '',
-            nameNumber: (r.name_number || '').toString().trim()
-        }
-        sessionItemsByRowKey.set(rowKey, { itemId, baseRow: base })
-        return base
-    })
-
-    const first = o?.recipientInfo?.contactDetails?.firstName || ''
-    const last = o?.recipientInfo?.contactDetails?.lastName || ''
-    const contactName = [first, last].filter(Boolean).join(' ')
-
-    const status = (o?.orderStatus || 'Pending').toString()
-    const statusLower = status.toLowerCase()
-    const editingAllowed =
-        !isAdminMode &&
-        (statusLower === 'pending' || statusLower === 'pending (24h)' || statusLower === '')
+    const firstName = order?.recipientInfo?.contactDetails?.firstName || ''
+    const lastName = order?.recipientInfo?.contactDetails?.lastName || ''
 
     return {
         order: {
-            id: o?._id || '',
-            number: o?.number || '',
-            status,
-            createdDate: o?._createdDate || o?._dateCreated || ''
+            id: order?._id || '',
+            number: order?.number || '',
+            status: order?.orderStatus || 'Pending',
+            createdDate: order?._createdDate || order?._dateCreated || ''
         },
         contact: {
-            name: contactName,
-            email: n(o?.buyerInfo?.email),
-            phone: n(o?.recipientInfo?.contactDetails?.phone)
+            name: [firstName, lastName].filter(Boolean).join(' '),
+            email: order?.buyerInfo?.email || '',
+            phone: order?.recipientInfo?.contactDetails?.phone || ''
         },
         shipping: {
-            address: formatAddress(o?.recipientInfo?.address)
+            address: formatAddress(order?.recipientInfo?.address)
         },
-        items: uiItems,
+        items: buildRows(order?.lineItems || []),
         permissions: {
-            isAdminMode: !!isAdminMode,
-            editingAllowed
+            isAdminMode,
+            editingAllowed: isEditingAllowed(order, isAdminMode)
         }
     }
 }
 
-// ✅ פונקציה חדשה להצגת הריפיטר עם אנימציה
-function showRepeaterWithAnimation() {
-    const repeater = $w('#editRepeater')
-    const arrow = $w('#arrow')
-
-    if (repeater && repeater.collapsed) {
-        repeater.expand()
-        // אנימציה: fade in + slide down
-        repeater.show('fade', { duration: 400 })
+function pushCurrentState() {
+    if (!currentOrder) {
+        log('pushCurrentState skipped — no currentOrder')
+        return
     }
-
-    if (arrow && arrow.collapsed) {
-        arrow.expand()
-        arrow.show('fade', { duration: 400 })
-    }
+    const state = orderToUiState(currentOrder, { isAdminMode: currentIsAdminMode })
+    log('pushCurrentState', {
+        orderNumber: state.order?.number,
+        status: state.order?.status,
+        itemCount: state.items?.length,
+        editingAllowed: state.permissions?.editingAllowed,
+        isAdminMode: state.permissions?.isAdminMode
+    })
+    postToUi({
+        type: 'TW_SET_STATE',
+        state
+    })
 }
 
-let isEditingAllowed = true
+async function handleAdminMode() {
+    log('handleAdminMode start', { orderId: currentOrderId, loggedIn: authentication.loggedIn() })
 
-function wireRepeater() {
-    if (!$w('#editRepeater')) return
+    const isLoggedIn = authentication.loggedIn()
 
-    $w('#editRepeater').onItemReady(async ($item, itemData, index) => {
-        const id = itemData._id
-        const st = {
-            initial: {
-                size: itemData.initial_size,
-                color: itemData.initial_color,
-                colorHex: itemData.initial_color_hex,
-                nameNum: itemData.initial_nameNum,
-                image: itemData.product_image
-            },
-            current: {
-                size: itemData.initial_size,
-                color: itemData.initial_color,
-                colorHex: itemData.initial_color_hex,
-                nameNum: itemData.initial_nameNum,
-                image: itemData.product_image
-            },
-            options: { sizes: [], colors: [] }
-        }
-        editState.set(id, st)
-
-        // Prefill SIZE immediately from initial (so the user sees a value even before we fetch options)
-        if ($item('#sizeDropdown')) {
-            if (st.current.size) {
-                const opt = [{ label: st.current.size, value: st.current.size }];
-                $item('#sizeDropdown').options = opt;
-                $item('#sizeDropdown').value = st.current.size;
-                $item('#sizeDropdown').expand();
-            } else {
-                $item('#sizeDropdown').collapse();
-            }
-        }
-
-        // Prefill COLOR and swatch immediately from initial
-        if ($item('#colorDropdown')) {
-            if (st.current.color) {
-                const opt = [{ label: st.current.color, value: st.current.color }];
-                $item('#colorDropdown').options = opt;
-                $item('#colorDropdown').value = st.current.color;
-                $item('#colorDropdown').expand();
-            } else {
-                $item('#colorDropdown').collapse();
-            }
-        }
-
-        if ($item('#selectedColor')) {
-            if (st.current.colorHex) {
-                $item('#selectedColor').style.backgroundColor = st.current.colorHex;
-                $item('#selectedColor').expand();
-            } else {
-                $item('#selectedColor').collapse();
-            }
-        }
-
-        // תמונה + שם מוצר
-        if ($item('#productImage')) {
-            const src = st.current.image
-            if (src) {
-                $item('#productImage').src = src
-                $item('#productImage').expand()
-            } else {
-                $item('#productImage').collapse()
-            }
-        }
-
-        if ($item('#productName')) {
-            const v = (itemData.product_name || '').toString().trim()
-            if (v) {
-                $item('#productName').text = v
-                $item('#productName').expand()
-            } else {
-                $item('#productName').collapse()
-            }
-        }
-
-        // Name & Number
-        if ($item('#productNameAndNum')) {
-            if (itemData.requires_nameNum) {
-                $item('#productNameAndNum').value = itemData.initial_nameNum
-                $item('#productNameAndNum').expand()
-            } else {
-                $item('#productNameAndNum').collapse()
-            }
-            $item('#productNameAndNum').onInput(() => {
-                st.current.nameNum = ($item('#productNameAndNum').value || '').toString().trim()
-                refreshSaveButton()
-            })
-        }
-
-        // הבאת productOptions מהבקאנד
+    if (!isLoggedIn) {
         try {
-            const r = await getFilteredProductOptions(itemData.product_id)
-            if (r?.ok) {
-                const po = r.productOptions || {}
-                const sizeKey = Object.keys(po).find(k => lower(k).includes('size'))
-                const colorKey = Object.keys(po).find(k => lower(k).includes('color'))
-
-                // SIZE (Dropdown רגיל)
-                if (sizeKey && $item('#sizeDropdown')) {
-                    const sizeOpts = toDropdownOptions(po[sizeKey].choices)
-                    st.options.sizes = sizeOpts
-                    if (sizeOpts.length) {
-                        $item('#sizeDropdown').options = sizeOpts
-                        const pre = st.current.size
-                        const found = pre ? sizeOpts.find(o => lower(o.value) === lower(pre)) : null
-                        $item('#sizeDropdown').value = found ? found.value : ''
-                        $item('#sizeDropdown').expand()
-                    } else {
-                        $item('#sizeDropdown').collapse()
-                    }
-                    $item('#sizeDropdown').onChange(() => {
-                        st.current.size = $item('#sizeDropdown').value || ''
-                        refreshSaveButton()
-                    })
-                } else if ($item('#sizeDropdown')) {
-                    $item('#sizeDropdown').collapse()
-                }
-
-                // COLOR (Dropdown רגיל + אלמנט צבע)
-                if (colorKey && $item('#colorDropdown')) {
-                    const colorChoices = po[colorKey].choices || []
-
-                    // ✅ שמור עותק מלא של הצבעים עם כל הנתונים
-                    st.options.colors = colorChoices.map(c => ({
-                        value: c.value || '',
-                        description: c.description || c.value || '',
-                        color: c.color || '',
-                        mainMedia: c.mainMedia || ''
-                    }))
-
-                    console.log('💾 Saved colors to state:', st.options.colors)
-
-                    if (colorChoices.length) {
-                        const colorOpts = colorChoices.map(c => ({
-                            label: c.description || c.value || '',
-                            value: c.value || ''
-                        }))
-
-                        $item('#colorDropdown').options = colorOpts
-
-                        // מצא את הצבע הנוכחי
-                        const currentColorValue = st.current.color
-                        const currentColorChoice = colorChoices.find(c =>
-                            lower(c.value) === lower(currentColorValue)
-                        )
-
-                        // אם יש צבע נוכחי, הצג אותו
-                        if (currentColorChoice) {
-                            $item('#colorDropdown').value = currentColorChoice.value
-
-                            // ✅ עדכן INITIAL STATE גם כן (זה החסר!)
-                            st.initial.colorHex = currentColorChoice.color || ''
-
-                            // עדכן את אלמנט הצבע
-                            if ($item('#selectedColor')) {
-                                if (currentColorChoice.color) {
-                                    $item('#selectedColor').style.backgroundColor = currentColorChoice.color
-                                    $item('#selectedColor').expand()
-                                } else {
-                                    $item('#selectedColor').collapse()
-                                }
-                            }
-
-                            // עדכן תמונה אם יש
-                            if (currentColorChoice.mainMedia && $item('#productImage')) {
-                                $item('#productImage').src = currentColorChoice.mainMedia
-                                st.current.image = currentColorChoice.mainMedia
-                                st.initial.image = currentColorChoice.mainMedia // ✅ גם פה
-                            }
-
-                            st.current.colorHex = currentColorChoice.color || ''
-                        } else {
-                            // אם אין צבע נוכחי, בחר את הראשון
-                            $item('#colorDropdown').value = colorOpts[0].value
-
-                            if ($item('#selectedColor') && colorChoices[0].color) {
-                                $item('#selectedColor').style.backgroundColor = colorChoices[0].color
-                                $item('#selectedColor').expand()
-                            }
-                        }
-
-                        // אירוע שינוי צבע
-                        $item('#colorDropdown').onChange(() => {
-                            const selectedValue = $item('#colorDropdown').value
-                            const selectedChoice = colorChoices.find(c => c.value === selectedValue)
-
-                            if (selectedChoice) {
-                                // עדכן state
-                                st.current.color = selectedChoice.value
-                                st.current.colorHex = selectedChoice.color || ''
-
-                                // עדכן אלמנט צבע
-                                if ($item('#selectedColor')) {
-                                    if (selectedChoice.color) {
-                                        $item('#selectedColor').style.backgroundColor = selectedChoice.color
-                                        $item('#selectedColor').expand()
-                                    } else {
-                                        $item('#selectedColor').collapse()
-                                    }
-                                }
-
-                                // עדכן תמונה אם יש
-                                if (selectedChoice.mainMedia && $item('#productImage')) {
-                                    $item('#productImage').src = selectedChoice.mainMedia
-                                    st.current.image = selectedChoice.mainMedia
-                                } else if ($item('#productImage')) {
-                                    // אם אין תמונה לצבע, חזור לתמונה המקורית
-                                    $item('#productImage').src = st.initial.image
-                                    st.current.image = st.initial.image
-                                }
-
-                                console.log('Color changed:', {
-                                    value: st.current.color,
-                                    hex: st.current.colorHex,
-                                    image: st.current.image
-                                })
-
-                                refreshSaveButton()
-                            }
-                        })
-
-                        $item('#colorDropdown').expand()
-                    } else {
-                        $item('#colorDropdown').collapse()
-                        if ($item('#selectedColor')) $item('#selectedColor').collapse()
-                    }
-                } else {
-                    if ($item('#colorDropdown')) $item('#colorDropdown').collapse()
-                    if ($item('#selectedColor')) $item('#selectedColor').collapse()
-                }
-            }
-        } catch (e) {
-            console.error('Error loading product options:', e)
-        }
-
-        // ✅ RESET לאייטם - תוקן
-        // ✅ RESET לאייטם - תוקן
-        if ($item('#rReset')) {
-            $item('#rReset').onClick(() => {
-                // אפס את ה-state
-                st.current = { ...st.initial }
-
-                // Reset size
-                if ($item('#sizeDropdown') && !$item('#sizeDropdown').collapsed) {
-                    const opts = st.options.sizes || []
-                    const pre = st.current.size
-                    const found = pre ? opts.find(o => lower(o.value) === lower(pre)) : null
-                    $item('#sizeDropdown').value = found ? found.value : ''
-                }
-
-                // Reset name/number
-                if ($item('#productNameAndNum') && !$item('#productNameAndNum').collapsed) {
-                    $item('#productNameAndNum').value = st.current.nameNum || ''
-                }
-
-                // Reset color
-                if ($item('#colorDropdown') && !$item('#colorDropdown').collapsed) {
-                    const initialColorValue = st.initial.color
-                    const initialColorChoice = st.options.colors.find(c =>
-                        lower(c.value) === lower(initialColorValue) ||
-                        lower(c.description) === lower(initialColorValue)
-                    )
-
-                    if (initialColorChoice) {
-                        $item('#colorDropdown').value = initialColorChoice.value
-
-                        if ($item('#selectedColor')) {
-                            if (initialColorChoice.color) {
-                                $item('#selectedColor').style.backgroundColor = initialColorChoice.color
-                                $item('#selectedColor').expand()
-                            } else {
-                                $item('#selectedColor').collapse()
-                            }
-                        }
-
-                        st.current.color = initialColorChoice.value
-                        st.current.colorHex = initialColorChoice.color || ''
-
-                        if (initialColorChoice.mainMedia && $item('#productImage')) {
-                            $item('#productImage').src = initialColorChoice.mainMedia
-                            st.current.image = initialColorChoice.mainMedia
-                        } else if (st.initial.image && $item('#productImage')) {
-                            $item('#productImage').src = st.initial.image
-                            st.current.image = st.initial.image
-                        }
-                    }
-                }
-
-                // Reset image
-                if ($item('#productImage')) {
-                    $item('#productImage').src = st.current.image
-                }
-
-                console.log('Reset to initial:', st.current)
-                refreshSaveButton()
-
-                // ✅ הסר את האייטם עם אנימציה
-                setTimeout(() => {
-                    const currentData = $w('#editRepeater').data || []
-                    const newData = currentData.filter(item => item._id !== id)
-
-                    $item('#repeaterContainer').hide('fade', { duration: 300 }).then(() => {
-                        $w('#editRepeater').data = newData
-                        editState.delete(id)
-
-                        // אם הריפיטר ריק, הסתר אותו והחץ
-                        if (newData.length === 0) {
-                            if ($w('#editRepeater')) $w('#editRepeater').collapse()
-                            if ($w('#arrow')) $w('#arrow').collapse()
-                        }
-
-                        console.log('Item removed:', id)
-                    })
-                }, 100)
-            })
-        }
-
-        if (!isEditingAllowed) {
-            if ($item('#sizeDropdown')) $item('#sizeDropdown').disable()
-            if ($item('#colorDropdown')) $item('#colorDropdown').disable()
-            if ($item('#productNameAndNum')) $item('#productNameAndNum').disable()
-            if ($item('#rReset')) {
-                $item('#rReset').disable()
-                $item('#rReset').hide() // ✅ הסתר לגמרי את כפתור RESET
-            }
-        } else {
-            // אם עריכה מותרת, אפשר את השדות
-            if ($item('#sizeDropdown') && !$item('#sizeDropdown').collapsed) $item('#sizeDropdown').enable()
-            if ($item('#colorDropdown') && !$item('#colorDropdown').collapsed) $item('#colorDropdown').enable()
-            if ($item('#productNameAndNum') && !$item('#productNameAndNum').collapsed) $item('#productNameAndNum').enable()
-            if ($item('#rReset')) {
-                $item('#rReset').enable()
-                $item('#rReset').show()
-            }
-        }
-
-        refreshSaveButton()
-    })
-}
-
-function disableAllEditing() {
-    isEditingAllowed = false // ✅ סמן שעריכה מושבתת
-
-    // השבת את כפתור השמירה
-    if ($w('#saveAll')) {
-        $w('#saveAll').disable()
-        $w('#saveAll').label = 'Editing Disabled'
-    }
-
-    // הסתר את החץ והריפיטר
-    if ($w('#arrow')) $w('#arrow').collapse()
-    if ($w('#editRepeater')) {
-        $w('#editRepeater').data = []
-        $w('#editRepeater').collapse()
-    }
-
-    console.log('🔒 All editing disabled')
-}
-
-function enableAllEditing() {
-    isEditingAllowed = true // ✅ סמן שעריכה מותרת
-
-    // אפשר את כפתור השמירה
-    if ($w('#saveAll')) {
-        $w('#saveAll').label = 'Save All'
-        $w('#saveAll').disable() // יישאר disabled עד שיהיו שינויים
-    }
-
-    console.log('🔓 Editing enabled')
-}
-
-function wireTable() {
-    if (!$w('#productsTable')) return
-    $w('#productsTable').onRowSelect(async ev => {
-        // ✅ אם עריכה מושבתת, אל תאפשר הוספת שורות
-        if (!isEditingAllowed) {
-            console.log('⛔ Editing is disabled')
-            return
-        }
-
-        const row = ev.rowData || {}
-        console.log("Selected row:", row)
-
-        // בדוק אם השורה הזו כבר קיימת בריפיטר
-        const existingData = $w('#editRepeater').data || []
-        const alreadyExists = existingData.some(item => item._rowKey === row._rowKey)
-
-        if (alreadyExists) {
-            console.log("Row already exists in repeater:", row._rowKey)
-            return
-        }
-
-        const item = {
-            _id: uid(),
-            _rowKey: row._rowKey,
-            product_id: row.product_id,
-            product_image: extractImageUrl(row.product_image),
-            product_name: row.product_name,
-            initial_size: row.product_size || '',
-            initial_color: row.product_color || '',
-            initial_color_hex: row.product_color_hex || '',
-            initial_nameNum: (row.name_number || '').toString().trim(),
-            requires_nameNum: !!((row.name_number || '').toString().trim())
-        }
-
-        $w('#editRepeater').data = [...existingData, item]
-        console.log("Added item:", item)
-
-        showRepeaterWithAnimation()
-    })
-}
-
-function wireSaveAll() {
-    if (!$w('#saveAll')) return
-    $w('#saveAll').onClick(async () => {
-        if ($w('#saveError')) $w('#saveError').hide()
-        const items = $w('#editRepeater').data || []
-        if (!items.length) return
-
-        const invalidIds = []
-        const changedItems = [] // ✅ רק אייטמים ששונו
-
-        items.forEach(it => {
-            const st = editState.get(it._id)
-            if (!st) return
-
-            // בדוק אם יש name/number חסר
-            if (it.requires_nameNum) {
-                if (!st.current.nameNum || !st.current.nameNum.toString().trim()) {
-                    invalidIds.push(it._id)
-                    return
-                }
-            }
-
-            // ✅ בדוק אם האייטם השתנה
-            const hasChanged = isDirty(st)
-
-            if (hasChanged) {
-                changedItems.push(it) // ✅ רק אם השתנה
-            }
-        })
-
-        if (invalidIds.length) {
-            if ($w('#saveError')) {
-                $w('#saveError').text = 'Please fill Name and Number for all required items'
-                $w('#saveError').show()
-            }
-            return
-        }
-
-        // ✅ אם אין שינויים בכלל
-        if (changedItems.length === 0) {
-            if ($w('#saveError')) {
-                $w('#saveError').text = 'No changes to save'
-                $w('#saveError').style.color = '#FF9800' // כתום
-                $w('#saveError').show()
-            }
-            return
-        }
-
-        // ✅ בנה payload רק מאייטמים ששונו
-        const payload = changedItems.map(it => {
-            const st = editState.get(it._id) || { current: {} }
-            return {
-                itemId: it._id,
-                rowKey: it._rowKey,
-                productId: it.product_id,
-                productName: it.product_name,
-                size: st.current.size || '',
-                color: st.current.color || '',
-                colorHex: st.current.colorHex || '',
-                nameNumber: st.current.nameNum || '',
-                image: st.current.image || ''
-            }
-        })
-
-        console.log('SAVE ALL payload (only changed):', payload)
-
-        // שלח לבקאנד
-        try {
-            if ($w('#saveAll')) {
-                $w('#saveAll').disable()
-                $w('#saveAll').label = 'Saving...'
-            }
-
-            const path = norm(wixLocation.path)
-            const orderId = path.length ? path[path.length - 1] : ''
-
-            if (!orderId) {
-                throw new Error('Order ID not found')
-            }
-
-            const result = await updateOrderLineItems(orderId, payload)
-
-            if (result.ok) {
-                console.log('✅ Order updated successfully:', result)
-
-                // ✅ עדכן את הסטטוס בעמוד
-                if ($w('#orderStatus')) {
-                    $w('#orderStatus').text = getStatusText('waiting for approval')
-                }
-
-                // ✅ עדכן את ההודעה
-                if ($w('#orderStatusMessage')) {
-                    $w('#orderStatusMessage').text = 'Your changes are waiting for approval. You cannot make additional changes at this time.'
-                    $w('#orderStatusMessage').show()
-                }
-
-                // ✅ השבת עריכה
-                disableAllEditing()
-
-                if ($w('#saveError')) {
-                    $w('#saveError').text = `${changedItems.length} item(s) updated successfully! Status: ${result.newStatus}`
-                    $w('#saveError').style.color = '#4CAF50'
-                    $w('#saveError').show()
-                }
-
-                // ✅ אל תנקה את הריפיטר - השאר את האייטמים המעודכנים
-                // setTimeout(() => {
-                //     $w('#editRepeater').data = []
-                //     editState.clear()
-                //     if ($w('#editRepeater')) $w('#editRepeater').collapse()
-                //     if ($w('#arrow')) $w('#arrow').collapse()
-                // }, 2000)
-
-                // ✅ במקום זאת - רענן את הריפיטר עם האייטמים המעודכנים (read-only)
-                setTimeout(() => {
-                    // הריפיטר כבר מכיל את האייטמים המעודכנים
-                    // פשוט נשאיר אותו פתוח ונשבית את כל השדות
-                    if ($w('#editRepeater')) {
-                        // טען מחדש את הריפיטר כדי להפעיל את ההשבתה
-                        const currentData = $w('#editRepeater').data
-                        $w('#editRepeater').data = []
-                        setTimeout(() => {
-                            $w('#editRepeater').data = currentData
-                        }, 50)
-                    }
-                }, 1500)
-            } else {
-                console.error('❌ Failed to update order:', result)
-
-                if ($w('#saveError')) {
-                    $w('#saveError').text = result.message || 'Failed to update order'
-                    $w('#saveError').style.color = '#F44336'
-                    $w('#saveError').show()
-                }
-            }
-
-        } catch (error) {
-            console.error('Error saving order:', error)
-            if ($w('#saveError')) {
-                $w('#saveError').text = 'Error: ' + error.message
-                $w('#saveError').style.color = '#F44336'
-                $w('#saveError').show()
-            }
-        } finally {
-            if ($w('#saveAll')) {
-                $w('#saveAll').disable()
-                $w('#saveAll').label = 'Save Changes'
-            }
-        }
-    })
-}
-
-const formatAddress = a => {
-    if (!a) return ''
-    const street = [a?.streetAddress?.name, a?.streetAddress?.number].filter(Boolean).join(' ')
-    const apt = a?.streetAddress?.apt ? 'Apt ' + a?.streetAddress?.apt : ''
-    const city = a?.city || ''
-    const country = a?.country || ''
-    const postal = a?.postalCode || ''
-    const left = [street, apt].filter(Boolean).join(', ')
-    const right = [city, country, postal].filter(Boolean).join(', ')
-    return [left, right].filter(Boolean).join(', ')
-}
-
-function handleOrderStatus(order, { isAdmin = false } = {}) {
-    const status = (order.orderStatus || 'Pending').toString();
-
-    // במצב אדמין: מציגים סטטוס בלבד, ללא השבתה/הסתרה
-     $w('#orderStatus').text = getStatusText(status);
-    if (isAdmin) {
-        if ($w('#orderStatus')) {
-           
-            $w('#orderStatus').expand();
-        }
-        if ($w('#orderStatusMessage')) $w('#orderStatusMessage').hide();
-        return; // <<< לא לקרוא disableAllEditing/enableAllEditing
-    }
-    // מצב רגיל (כמו שהיה)
-    switch (status.toLowerCase()) {
-    case 'waiting for approval':
-        disableAllEditing();
-        if ($w('#orderStatusMessage')) {
-            $w('#orderStatusMessage').text ='Your changes are waiting for approval. You cannot make additional changes at this time.';
-            $w('#orderStatusMessage').show();
-        }
-        break;
-    case 'approved':
-        disableAllEditing();
-        if ($w('#orderStatusMessage')) {
-            $w('#orderStatusMessage').text = 'Your changes have been approved. No further edits are allowed.';
-            $w('#orderStatusMessage').show();
-        }
-        break;
-    case 'shipped':
-        disableAllEditing();
-        if ($w('#orderStatusMessage')) {
-            $w('#orderStatusMessage').text = 'Your order has been shipped. No changes can be made.';
-            $w('#orderStatusMessage').show();
-        }
-        break;
-    case 'cancelled':
-    case 'canceled':
-        disableAllEditing();
-        if ($w('#orderStatusMessage')) {
-            $w('#orderStatusMessage').text = 'This order has been cancelled.';
-            $w('#orderStatusMessage').show();
-        }
-        break;
-    case 'pending':
-    default:
-        enableAllEditing();
-        if ($w('#orderStatusMessage')) $w('#orderStatusMessage').hide();
-        break;
-    }
-}
-
-function getStatusText(status) {
-    console.log("status", status);
-    const statusMap = {
-        'waiting for approval': '⏳ Waiting for Approval',
-        'approved': '✅ Approved',
-        'shipped': '📦 Shipped',
-        'cancelled': '❌ Cancelled',
-        'canceled': '❌ Cancelled',
-        'pending (24h)': '⏱️ Pending (24h)'
-    }
-    return statusMap[status.toLowerCase()] || status
-}
-
-function wireAuth() {
-    const path = norm(wixLocation.path)
-    const orderId = path.length ? path[path.length - 1] : ''
-    currentOrderId = orderId
-
-    // ✅ בדוק אם יש admin=true בקישור
-    const query = wixLocation.query
-    const isAdminMode = query.admin === 'true'
-
-    if (isAdminMode) {
-        // ✅ מצב Admin - התחבר ובדוק הרשאות
-        handleAdminAuth(orderId)
-    } else {
-        // ✅ מצב רגיל - auth בתוך ה-iframe (UI only)
-        // הנתונים יגיעו דרך הודעות TW_AUTH_SUBMIT -> verifyOrderAndStatus -> TW_AUTH_RESULT/TW_SET_STATE
-        postToUi({ type: 'TW_INIT', orderId, isAdminMode: false })
-    }
-}
-
-async function handleAdminAuth(orderId) {
-    try {
-        // ✅ בדוק אם משתמש מחובר
-        const isLoggedIn = authentication.loggedIn()
-
-        if (!isLoggedIn) {
-            // ✅ בקש התחברות
-            authentication.promptLogin({
+            log('awaiting admin login prompt')
+            await authentication.promptLogin({
                 mode: 'login',
                 modal: true
-            }).then(() => {
-                // אחרי התחברות מוצלחת - נסה שוב
-                handleAdminAuth(orderId)
-            }).catch((error) => {
-                console.error('Login cancelled or failed:', error)
             })
+            log('admin login prompt resolved', { loggedIn: authentication.loggedIn() })
+        } catch (error) {
+            console.error(LOG_NS, 'Admin login cancelled or failed:', error)
             return
         }
-
-        // ✅ משתמש מחובר - בדוק תפקידים
-        const roleCheck = await checkMemberRoles()
-
-        if (!roleCheck.ok || (!roleCheck.isAdmin && !roleCheck.isContributor && !roleCheck.isOwner)) {
-            // ✅ אין הרשאות
-            console.error('Access denied: Admin permissions required')
-            if ($w('#saveError')) {
-                $w('#saveError').text = 'Access denied: Admin permissions required'
-                $w('#saveError').style.color = '#F44336'
-                $w('#saveError').show()
-            }
-            return
-        }
-
-        console.log('✅ Admin authenticated:', roleCheck)
-
-        // ✅ שלוף את ההזמנה ישירות (ללא Lightbox)
-        const result = await getOrderForAdmin(orderId)
-        console.log("result", result);
-        if (result.ok) {
-            displayOrderDetails(result.order, true) // true = admin mode
-        } else {
-            console.error('Failed to fetch order:', result)
-            if ($w('#saveError')) {
-                $w('#saveError').text = 'Order not found'
-                $w('#saveError').style.color = '#F44336'
-                $w('#saveError').show()
-            }
-        }
-
-    } catch (error) {
-        console.error('Admin auth error:', error)
     }
+
+    const roleCheck = await checkMemberRoles()
+    log('checkMemberRoles', {
+        ok: roleCheck?.ok,
+        isAdmin: roleCheck?.isAdmin,
+        isContributor: roleCheck?.isContributor,
+        isOwner: roleCheck?.isOwner
+    })
+
+    if (!roleCheck?.ok || (!roleCheck.isAdmin && !roleCheck.isContributor && !roleCheck.isOwner)) {
+        log('admin access denied — role check failed')
+        postToUi({
+            type: 'TW_AUTH_RESULT',
+            ok: false,
+            message: 'Access denied: Admin permissions required'
+        })
+        return
+    }
+
+    const result = await getOrderForAdmin(currentOrderId)
+    log('getOrderForAdmin', { ok: result?.ok, hasOrder: !!result?.order })
+
+    if (!result?.ok) {
+        postToUi({
+            type: 'TW_AUTH_RESULT',
+            ok: false,
+            message: 'Order not found'
+        })
+        return
+    }
+
+    currentOrder = result.order
+    log('admin order loaded', { number: currentOrder?.number, status: currentOrder?.orderStatus })
+    pushCurrentState()
 }
 
-function displayOrderDetails(order, isAdminMode = false) {
-    const o = order || {};
-    console.log("order", o);
-
-    const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2,8)}`;
-
-    // keep your withIds() if you want, but we'll generate fresh ids in the mappers below
-
-    if ($w('#title')) $w('#title').text = `Your Order Details #${o.number}:`;
-
-    // UI iframe state push (reuses #counter HTMLComponent for now)
-    currentOrder = o
-    const state = orderToUiState(o, { isAdminMode })
-    postToUi({ type: 'TW_SET_STATE', state })
-
-    // --- admin block (replaces your previous isAdminMode handling) ---
-    if (isAdminMode) {
-        // lock editing in admin (read-only)
-        isEditingAllowed = false;
-
-        const fromLineItems = (lis = []) => buildRows(lis).map(r => ({
-            _id: uid(),
-            _rowKey: r._rowKey,
-            product_id: r.product_id,
-            product_image: extractImageUrl(r.product_image),
-            product_name: r.product_name,
-            initial_size: r.product_size || '',
-            initial_color: r.product_color || '',
-            initial_color_hex: r.product_color_hex || '',
-            initial_nameNum: (r.name_number || '').toString().trim(),
-            requires_nameNum: !!(r.name_number || '').toString().trim()
-        }));
-
-        // NEW: map newLineItems into the same structure your repeater expects
-        const fromNewLineItems = (nlis = []) => (nlis || []).map(nli => ({
-            _id: uid(),
-            _rowKey: nli.rowKey || uid(),
-            product_id: nli.productId || '',
-            product_image: extractImageUrl(nli.image || ''),
-            product_name: nli.productName || '',
-            initial_size: nli.size || '',
-            initial_color: nli.color || '', // often the hex (value)
-            initial_color_hex: nli.colorHex || '', // explicit hex if provided
-            initial_nameNum: (nli.nameNumber || '').toString().trim(),
-            requires_nameNum: !!(nli.nameNumber || '').toString().trim()
-        }));
-
-        const sourceItems = Array.isArray(o.newLineItems) && o.newLineItems.length ?
-            fromNewLineItems(o.newLineItems) :
-            fromLineItems(o.lineItems || []);
-
-        if ($w('#editRepeater')) $w('#editRepeater').data = sourceItems;
-        if (typeof showRepeaterWithAnimation === 'function') showRepeaterWithAnimation();
-
-        // admin view: read-only
-        if ($w('#saveAll')) {
-            $w('#saveAll').disable();
-            $w('#saveAll').label = 'View Only';
-        }
-    }
-    // --- end admin block ---
-
-    const first = o?.recipientInfo?.contactDetails?.firstName || '';
-    const last = o?.recipientInfo?.contactDetails?.lastName || '';
-    if ($w('#name')) $w('#name').text = `Name: ${[first, last].filter(Boolean).join(' ')}`;
-    if ($w('#email')) $w('#email').text = `Email: ${n(o?.buyerInfo?.email)}`;
-    if ($w('#phone')) $w('#phone').text = `Phone: ${n(o?.recipientInfo?.contactDetails?.phone)}`;
-    if ($w('#address')) $w('#address').text = `Address: ${formatAddress(o?.recipientInfo?.address)}`;
-
-    // IMPORTANT: don't wipe UI in admin
-    handleOrderStatus(o, { isAdmin: isAdminMode });
-
-    // products table (view)
-    const rows = buildRows(o?.lineItems);
-    if ($w('#productsTable')) $w('#productsTable').rows = rows;
-    wireTable();
-
-    if ($w('#box1')) $w('#box1').collapse();
-}
-
-const isDirty = st =>
-    (st.current.size || '') !== (st.initial.size || '') ||
-    (st.current.color || '') !== (st.initial.color || '') ||
-    (st.current.nameNum || '') !== (st.initial.nameNum || '')
-
-function refreshSaveButton() {
-    const anyDirty = Array.from(editState.values()).some(isDirty)
-    if ($w('#saveAll')) anyDirty ? $w('#saveAll').enable() : $w('#saveAll').disable()
+function buildUpdatePayload(changes) {
+    const payload = changes.map(change => ({
+        itemId: (change.itemId || '').toString() || uid(),
+        rowKey: (change.rowKey || '').toString(),
+        productId: (change.productId || '').toString(),
+        productName: (change.productName || '').toString(),
+        size: (change.size || '').toString(),
+        color: (change.color || '').toString(),
+        colorHex: (change.colorHex || '').toString(),
+        nameNumber: (change.nameNumber || '').toString(),
+        image: (change.image || '').toString()
+    }))
+    log('buildUpdatePayload', {
+        rowCount: payload.length,
+        rowKeys: payload.map(p => p.rowKey).slice(0, 15)
+    })
+    return payload
 }
 
 $w.onReady(function () {
     uiHtml = $w(UI_HTML_ID)
-    if (uiHtml && IFRAME_URL) {
-        try {
-            uiHtml.src = IFRAME_URL
-        } catch (e) {
-            console.error('Failed setting iframe src:', e)
+    if (!uiHtml) {
+        log('onReady: HTML component not found —', UI_HTML_ID)
+        return
+    }
+
+    const path = norm(wixLocation.path)
+    currentOrderId = path.length ? path[path.length - 1] : ''
+    currentIsAdminMode = wixLocation.query.admin === 'true'
+
+    log('onReady', {
+        iframeSrc: IFRAME_URL,
+        orderIdFromPath: currentOrderId,
+        adminQuery: currentIsAdminMode,
+        path
+    })
+
+    uiHtml.src = IFRAME_URL
+
+    uiHtml.onMessage(async event => {
+        const data = event?.data || {}
+        if (!data?.type) {
+            log('← iframe message ignored (no type)', typeof event?.data)
+            return
         }
 
-        uiHtml.onMessage(async (e) => {
-            const d = e?.data || {}
-            if (!d || typeof d !== 'object') return
+        log('← iframe', summarizeInboundData(data))
 
-            if (d.type === 'TW_READY') {
-                // send init so the iframe knows orderId/admin
-                const query = wixLocation.query
-                const isAdminMode = query.admin === 'true'
-                const path = norm(wixLocation.path)
-                const orderId = path.length ? path[path.length - 1] : ''
-                currentOrderId = orderId
-                postToUi({ type: 'TW_INIT', orderId, isAdminMode: !!isAdminMode })
+        if (data.type === 'TW_READY') {
+            log('TW_READY: sending TW_INIT', { orderId: currentOrderId, isAdminMode: currentIsAdminMode })
+            postToUi({
+                type: 'TW_INIT',
+                orderId: currentOrderId,
+                isAdminMode: currentIsAdminMode
+            })
 
-                // if we already have an order loaded (admin flow), push state again
-                if (currentOrder) {
-                    const state = orderToUiState(currentOrder, { isAdminMode })
-                    postToUi({ type: 'TW_SET_STATE', state })
-                }
-                return
+            if (currentIsAdminMode) {
+                await handleAdminMode()
             }
+            return
+        }
 
-            if (d.type === 'TW_REQUEST_STATE') {
-                const query = wixLocation.query
-                const isAdminMode = query.admin === 'true'
-                if (currentOrder) {
-                    const state = orderToUiState(currentOrder, { isAdminMode })
-                    postToUi({ type: 'TW_SET_STATE', state })
-                } else {
-                    postToUi({ type: 'TW_INIT', orderId: currentOrderId, isAdminMode: !!isAdminMode })
-                }
-                return
+        if (data.type === 'TW_REQUEST_STATE') {
+            log('TW_REQUEST_STATE', { hasCurrentOrder: !!currentOrder })
+            if (currentOrder) {
+                pushCurrentState()
+            } else {
+                postToUi({
+                    type: 'TW_INIT',
+                    orderId: currentOrderId,
+                    isAdminMode: currentIsAdminMode
+                })
             }
+            return
+        }
 
-            if (d.type === 'TW_AUTH_SUBMIT') {
-                const email = (d.email || '').toString().trim()
-                const orderNumber = (d.orderNumber || '').toString().trim()
+        if (data.type === 'TW_AUTH_SUBMIT') {
+            try {
+                const email = (data.email || '').toString().trim()
+                const orderNumber = (data.orderNumber || '').toString().trim()
+
+                log('TW_AUTH_SUBMIT: validating', {
+                    orderId: currentOrderId,
+                    email: maskEmail(email),
+                    orderNumber: maskOrderRef(orderNumber)
+                })
+
                 if (!currentOrderId || !email || !orderNumber) {
-                    postToUi({ type: 'TW_AUTH_RESULT', ok: false, message: 'Missing order number or email' })
+                    log('TW_AUTH_SUBMIT: rejected — missing orderId, email, or orderNumber')
+                    postToUi({
+                        type: 'TW_AUTH_RESULT',
+                        ok: false,
+                        message: 'Missing order number or email'
+                    })
                     return
                 }
-                try {
-                    const res = await verifyOrderAndStatus(currentOrderId, email, orderNumber)
-                    if (!res || !res.ok) {
-                        postToUi({ type: 'TW_AUTH_RESULT', ok: false, message: 'Access denied for the provided details' })
-                        return
-                    }
-                    currentOrder = res.order
-                    postToUi({ type: 'TW_AUTH_RESULT', ok: true })
-                    postToUi({ type: 'TW_SET_STATE', state: orderToUiState(res.order, { isAdminMode: false }) })
-                } catch (err) {
-                    console.error('verifyOrderAndStatus failed:', err)
-                    postToUi({ type: 'TW_AUTH_RESULT', ok: false, message: 'Verification failed. Please try again.' })
-                }
-                return
-            }
 
-            if (d.type === 'TW_SAVE_SUBMIT') {
-                const changes = Array.isArray(d.changes) ? d.changes : []
+                const result = await verifyOrderAndStatus(currentOrderId, email, orderNumber)
+                log('verifyOrderAndStatus result', { ok: result?.ok, hasOrder: !!result?.order })
+
+                if (!result?.ok) {
+                    log('TW_AUTH_SUBMIT: verify failed (ok=false)')
+                    postToUi({
+                        type: 'TW_AUTH_RESULT',
+                        ok: false,
+                        message: 'Access denied for the provided details'
+                    })
+                    return
+                }
+
+                currentOrder = result.order
+                log('TW_AUTH_SUBMIT: success', { orderNumber: currentOrder?.number, status: currentOrder?.orderStatus })
+                postToUi({ type: 'TW_AUTH_RESULT', ok: true })
+                pushCurrentState()
+            } catch (error) {
+                console.error(LOG_NS, 'verifyOrderAndStatus failed:', error)
+                postToUi({
+                    type: 'TW_AUTH_RESULT',
+                    ok: false,
+                    message: 'Verification failed. Please try again.'
+                })
+            }
+            return
+        }
+
+        if (data.type === 'TW_SAVE_SUBMIT') {
+            try {
+                const changes = Array.isArray(data.changes) ? data.changes : []
                 if (!currentOrderId) {
-                    postToUi({ type: 'TW_SAVE_RESULT', ok: false, message: 'Order ID not found' })
+                    log('TW_SAVE_SUBMIT: rejected — no orderId')
+                    postToUi({
+                        type: 'TW_SAVE_RESULT',
+                        ok: false,
+                        message: 'Order ID not found'
+                    })
                     return
                 }
+
                 if (!changes.length) {
-                    postToUi({ type: 'TW_SAVE_RESULT', ok: false, message: 'No changes to save' })
+                    log('TW_SAVE_SUBMIT: rejected — empty changes')
+                    postToUi({
+                        type: 'TW_SAVE_RESULT',
+                        ok: false,
+                        message: 'No changes to save'
+                    })
                     return
                 }
 
-                // Build payload for backend/orderUpdates.web (same shape you used before)
-                const payload = changes.map(ch => ({
-                    itemId: (ch.itemId || '').toString() || uid(),
-                    rowKey: (ch.rowKey || '').toString(),
-                    productId: (ch.productId || '').toString(),
-                    productName: (ch.productName || '').toString(),
-                    size: (ch.size || '').toString(),
-                    color: (ch.color || '').toString(),
-                    colorHex: (ch.colorHex || '').toString(),
-                    nameNumber: (ch.nameNumber || '').toString(),
-                    image: (ch.image || '').toString()
-                }))
+                const result = await updateOrderLineItems(currentOrderId, buildUpdatePayload(changes))
+                log('updateOrderLineItems result', { ok: result?.ok, newStatus: result?.newStatus, message: result?.message })
 
-                try {
-                    const result = await updateOrderLineItems(currentOrderId, payload)
-                    if (result && result.ok) {
-                        // lock editing in UI once saved (waiting for approval)
-                        postToUi({ type: 'TW_SAVE_RESULT', ok: true, newStatus: result.newStatus || '' })
-                        postToUi({ type: 'TW_LOCK_EDITING', locked: true, reason: 'waiting for approval' })
-                        return
-                    }
-                    postToUi({ type: 'TW_SAVE_RESULT', ok: false, message: (result && result.message) ? result.message : 'Failed to update order' })
-                } catch (err) {
-                    console.error('updateOrderLineItems failed:', err)
-                    postToUi({ type: 'TW_SAVE_RESULT', ok: false, message: 'Error saving changes' })
+                if (!result?.ok) {
+                    postToUi({
+                        type: 'TW_SAVE_RESULT',
+                        ok: false,
+                        message: result?.message || 'Failed to update order'
+                    })
+                    return
                 }
-                return
-            }
-        })
-    }
 
-    // ✅ הסתר ריפיטר וחץ בהתחלה
-    if ($w('#editRepeater')) {
-        $w('#editRepeater').data = []
-        $w('#editRepeater').collapse()
-    }
-    wireRepeater()
-    wireSaveAll()
-    wireAuth()
+                if (currentOrder) {
+                    currentOrder = {
+                        ...currentOrder,
+                        orderStatus: result.newStatus || 'waiting for approval'
+                    }
+                }
+
+                postToUi({
+                    type: 'TW_SAVE_RESULT',
+                    ok: true,
+                    newStatus: result.newStatus || 'waiting for approval'
+                })
+                pushCurrentState()
+                postToUi({
+                    type: 'TW_LOCK_EDITING',
+                    locked: true,
+                    reason: 'waiting for approval'
+                })
+                log('TW_SAVE_SUBMIT: completed — state updated + TW_LOCK_EDITING sent')
+            } catch (error) {
+                console.error(LOG_NS, 'updateOrderLineItems failed:', error)
+                postToUi({
+                    type: 'TW_SAVE_RESULT',
+                    ok: false,
+                    message: 'Error saving changes'
+                })
+            }
+        }
+    })
 })

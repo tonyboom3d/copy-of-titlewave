@@ -8,6 +8,12 @@ const norm = x => Array.isArray(x) ? x : []
 $w.onReady(function () {
   const path = norm(wixLocation.path)
   orderId = path.length ? path[path.length - 1] : ''
+
+  if ($w('#submit')) {
+    $w('#submit').onClick(() => {
+      handleSubmit()
+    })
+  }
 })
 
 async function handleSubmit() {
@@ -29,6 +35,4 @@ async function handleSubmit() {
   wixWindow.lightbox.close(res)
 }
 
-$w('#submit').onClick((event) => {
-  handleSubmit()
-})
+// Note: Lightbox is kept as a fallback. Primary auth UI now lives in the iframe.

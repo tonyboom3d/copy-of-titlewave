@@ -9,7 +9,32 @@ export const verifyOrderAndStatus = webMethod(
     Permissions.Anyone,
     async (orderId, email, orderNumber) => {
         try {
-            const o = await orders.getOrder(orderId)
+            // orderId can be either:
+            // - Wix order _id (orders.getOrder expects this)
+            // - ordersStatus CMS record _id (dynamic page uses record id in URL)
+            let resolvedOrderId = orderId
+
+            let o = null
+            try {
+                o = await orders.getOrder(resolvedOrderId)
+            } catch (e) {
+                // Try resolving from CMS record id → actual orderId
+                const rec = await wixData.query('ordersStatus')
+                    .eq('_id', orderId)
+                    .limit(1)
+                    .find({ suppressAuth: true, suppressHooks: true })
+
+                const item = rec.items[0] || null
+                const maybeOrderId = item?.orderId || ''
+
+                if (!maybeOrderId) {
+                    console.error('verifyOrderAndStatus resolve failed:', { orderId })
+                    return { ok: false, code: 'ORDER_NOT_FOUND' }
+                }
+
+                resolvedOrderId = maybeOrderId
+                o = await orders.getOrder(resolvedOrderId)
+            }
             const be = s(o?.buyerInfo?.email)
             const ue = s(email)
             const bn = s(o?.number)
@@ -19,7 +44,7 @@ export const verifyOrderAndStatus = webMethod(
 
             // ✅ שלוף את הסטטוס מ-CMS
             const q = await wixData.query('ordersStatus')
-                .eq('orderId', orderId)
+                .eq('orderId', resolvedOrderId)
                 .limit(1)
                 .find({ suppressAuth: true, suppressHooks: true })
 
@@ -54,14 +79,31 @@ export const getOrderForAdmin = webMethod(Permissions.Anyone, async (orderId) =>
             return { ok: false, code: 'UNAUTHORIZED' }
         }
 
-        const o = await orders.getOrder(orderId)
+        // orderId can be either Wix order _id or ordersStatus record _id (dynamic URL)
+        let resolvedOrderId = orderId
+        let o = null
+        try {
+            o = await orders.getOrder(resolvedOrderId)
+        } catch (e) {
+            const rec = await wixData.query('ordersStatus')
+                .eq('_id', orderId)
+                .limit(1)
+                .find({ suppressAuth: true, suppressHooks: true })
+
+            const item = rec.items[0] || null
+            const maybeOrderId = item?.orderId || ''
+            if (!maybeOrderId) return { ok: false, code: 'ORDER_NOT_FOUND' }
+
+            resolvedOrderId = maybeOrderId
+            o = await orders.getOrder(resolvedOrderId)
+        }
 
         if (!o) {
             return { ok: false, code: 'ORDER_NOT_FOUND' }
         }
 
         const q = await wixData.query('ordersStatus')
-            .eq('orderId', orderId)
+            .eq('orderId', resolvedOrderId)
             .limit(1)
             .find({ suppressAuth: true, suppressHooks: true })
 
