@@ -1,12 +1,12 @@
 import wixLocation from 'wix-location'
 import { authentication } from 'wix-members-frontend'
-import { getOrderForAdmin, verifyOrderAndStatus } from 'backend/editLogics.web'
+import { getFilteredProductOptions, getOrderForAdmin, verifyOrderAndStatus } from 'backend/editLogics.web'
 import { updateOrderLineItems } from 'backend/orderUpdates.web'
 import { checkMemberRoles } from 'backend/adminAuth.web'
 
 const IFRAME_URL = 'https://tonyboom3d.github.io/copy-of-titlewave/'
 const IFRAME_ORIGIN = 'https://tonyboom3d.github.io'
-const UI_HTML_ID = '#counter'
+const UI_HTML_ID = '#html1'
 
 const LOG_NS = '[TW order iframe]'
 
@@ -82,6 +82,7 @@ let uiHtml = null
 let currentOrderId = ''
 let currentOrder = null
 let currentIsAdminMode = false
+const productOptionsCache = new Map()
 
 function postToUi(message) {
     if (!uiHtml) {
@@ -179,6 +180,106 @@ function buildRows(lineItems) {
     return rows
 }
 
+function buildRowsFromSavedItems(savedItems) {
+    if (!Array.isArray(savedItems)) return []
+
+    return savedItems.map((item, index) => ({
+        itemId: (item?.itemId || `${index}`).toString(),
+        rowKey: (item?.rowKey || `${index}`).toString(),
+        productId: item?.productId || '',
+        image: item?.image || '',
+        productName: item?.productName || '',
+        size: item?.size || '',
+        color: item?.color || '',
+        colorHex: item?.colorHex || '',
+        nameNumber: item?.nameNumber || ''
+    }))
+}
+
+function ensureOptionInList(options, value, fallback = value) {
+    const normalizedValue = (value || '').toString()
+    if (!normalizedValue) return options
+    const exists = options.some(option => (option?.value || '').toString().toLowerCase() === normalizedValue.toLowerCase())
+    if (exists) return options
+    return [{ value: normalizedValue, label: fallback || normalizedValue }, ...options]
+}
+
+async function getProductOptionSets(productId, currentItem = {}) {
+    const cacheKey = (productId || '').toString()
+    if (!cacheKey) return { sizes: [], colors: [] }
+
+    if (!productOptionsCache.has(cacheKey)) {
+        log('loading product options', { productId: cacheKey })
+        productOptionsCache.set(cacheKey, (async () => {
+            const result = await getFilteredProductOptions(cacheKey)
+            if (!result?.ok) {
+                log('product options load failed', { productId: cacheKey, code: result?.code || '' })
+                return { sizes: [], colors: [] }
+            }
+
+            const productOptions = result.productOptions || {}
+            const sizeKey = Object.keys(productOptions).find(key => lower(key).includes('size'))
+            const colorKey = Object.keys(productOptions).find(key => lower(key).includes('color'))
+
+            const sizes = sizeKey
+                ? (productOptions[sizeKey]?.choices || []).map(choice => ({
+                    value: choice?.value || '',
+                    label: choice?.description || choice?.value || ''
+                })).filter(choice => choice.value)
+                : []
+
+            const colors = colorKey
+                ? (productOptions[colorKey]?.choices || []).map(choice => ({
+                    value: choice?.value || '',
+                    label: choice?.description || choice?.value || '',
+                    color: choice?.color || '',
+                    image: choice?.mainMedia || ''
+                })).filter(choice => choice.value)
+                : []
+
+            log('product options loaded', {
+                productId: cacheKey,
+                sizeCount: sizes.length,
+                colorCount: colors.length
+            })
+
+            return { sizes, colors }
+        })())
+    }
+
+    const optionSets = await productOptionsCache.get(cacheKey)
+    const sizes = ensureOptionInList(optionSets.sizes || [], currentItem.size)
+    const colors = ensureOptionInList(
+        (optionSets.colors || []).map(color => ({ ...color, label: color.label || color.value || '' })),
+        currentItem.color,
+        currentItem.color
+    )
+
+    return { sizes, colors }
+}
+
+async function buildUiItems(lineItems, savedItems = []) {
+    const rows = Array.isArray(savedItems) && savedItems.length
+        ? buildRowsFromSavedItems(savedItems)
+        : buildRows(lineItems)
+
+    return Promise.all(rows.map(async row => {
+        const optionSets = await getProductOptionSets(row.productId, row)
+        const matchingColor = (optionSets.colors || []).find(option =>
+            (option?.value || '').toString().toLowerCase() === (row.color || '').toString().toLowerCase() ||
+            (option?.label || '').toString().toLowerCase() === (row.color || '').toString().toLowerCase()
+        )
+        const inferredColorHex = row.colorHex || matchingColor?.color || ((row.color || '').startsWith('#') ? row.color : '')
+
+        return {
+            ...row,
+            colorHex: inferredColorHex,
+            image: matchingColor?.image || row.image || '',
+            optionSets
+        }
+    }))
+}
+
 function formatAddress(address) {
     if (!address) return ''
 
@@ -198,9 +299,10 @@ function isEditingAllowed(order, isAdminMode) {
     return status === '' || status === 'pending' || status === 'pending (24h)'
 }
 
-function orderToUiState(order, { isAdminMode = false } = {}) {
+async function orderToUiState(order, { isAdminMode = false } = {}) {
     const firstName = order?.recipientInfo?.contactDetails?.firstName || ''
     const lastName = order?.recipientInfo?.contactDetails?.lastName || ''
+    const items = await buildUiItems(order?.lineItems || [], order?.newLineItems || [])
 
     return {
         order: {
@@ -217,7 +319,7 @@ function orderToUiState(order, { isAdminMode = false } = {}) {
         shipping: {
             address: formatAddress(order?.recipientInfo?.address)
         },
-        items: buildRows(order?.lineItems || []),
+        items,
         permissions: {
             isAdminMode,
             editingAllowed: isEditingAllowed(order, isAdminMode)
@@ -225,12 +327,12 @@ function orderToUiState(order, { isAdminMode = false } = {}) {
     }
 }
 
-function pushCurrentState() {
+async function pushCurrentState() {
     if (!currentOrder) {
         log('pushCurrentState skipped — no currentOrder')
         return
     }
-    const state = orderToUiState(currentOrder, { isAdminMode: currentIsAdminMode })
+    const state = await orderToUiState(currentOrder, { isAdminMode: currentIsAdminMode })
     log('pushCurrentState', {
         orderNumber: state.order?.number,
         status: state.order?.status,
@@ -295,7 +397,7 @@ async function handleAdminMode() {
 
     currentOrder = result.order
     log('admin order loaded', { number: currentOrder?.number, status: currentOrder?.orderStatus })
-    pushCurrentState()
+    await pushCurrentState()
 }
 
 function buildUpdatePayload(changes) {
@@ -363,7 +465,7 @@ $w.onReady(function () {
         if (data.type === 'TW_REQUEST_STATE') {
             log('TW_REQUEST_STATE', { hasCurrentOrder: !!currentOrder })
             if (currentOrder) {
-                pushCurrentState()
+                await pushCurrentState()
             } else {
                 postToUi({
                     type: 'TW_INIT',
@@ -411,7 +513,7 @@ $w.onReady(function () {
                 currentOrder = result.order
                 log('TW_AUTH_SUBMIT: success', { orderNumber: currentOrder?.number, status: currentOrder?.orderStatus })
                 postToUi({ type: 'TW_AUTH_RESULT', ok: true })
-                pushCurrentState()
+                await pushCurrentState()
             } catch (error) {
                 console.error(LOG_NS, 'verifyOrderAndStatus failed:', error)
                 postToUi({
@@ -446,7 +548,8 @@ $w.onReady(function () {
                     return
                 }
 
-                const result = await updateOrderLineItems(currentOrderId, buildUpdatePayload(changes))
+                const payload = buildUpdatePayload(changes)
+                const result = await updateOrderLineItems(currentOrderId, payload)
                 log('updateOrderLineItems result', { ok: result?.ok, newStatus: result?.newStatus, message: result?.message })
 
                 if (!result?.ok) {
@@ -461,6 +564,12 @@ $w.onReady(function () {
                 if (currentOrder) {
                     currentOrder = {
                         ...currentOrder,
+                        newLineItems: payload,
+                        orderStatus: result.newStatus || 'waiting for approval'
+                    }
+                } else {
+                    currentOrder = {
+                        newLineItems: payload,
                         orderStatus: result.newStatus || 'waiting for approval'
                     }
                 }
@@ -470,7 +579,7 @@ $w.onReady(function () {
                     ok: true,
                     newStatus: result.newStatus || 'waiting for approval'
                 })
-                pushCurrentState()
+                await pushCurrentState()
                 postToUi({
                     type: 'TW_LOCK_EDITING',
                     locked: true,

@@ -333,6 +333,22 @@
                             </div>
                         </div>
 
+                        <!-- Color Dropdown -->
+                        <div id="modalColorGroup" class="hidden flex flex-col gap-1.5 relative">
+                            <label class="text-sm text-slate-600 font-medium">Color</label>
+                            <div class="flex items-center gap-3">
+                                <div class="relative flex-1">
+                                    <select id="modalColor" class="w-full border border-slate-300 rounded-md px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 appearance-none bg-white cursor-pointer shadow-sm">
+                                        <!-- Options populated by JS -->
+                                    </select>
+                                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-slate-500">
+                                        <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"></path></svg>
+                                    </div>
+                                </div>
+                                <span id="modalColorSwatch" class="hidden inline-block w-8 h-8 rounded-full border border-slate-300 shadow-sm shrink-0"></span>
+                            </div>
+                        </div>
+
                         <!-- Name & Number Input -->
                         <div class="flex flex-col gap-1.5">
                             <label class="text-sm text-slate-600 font-medium">Name and Number</label>
@@ -564,7 +580,12 @@
                     </td>
                     <td class="py-4 px-6 text-slate-800 border-l border-slate-200">${escapeHtml(productName)}</td>
                     <td class="py-4 px-6 text-slate-800 border-l border-slate-200">${escapeHtml(size)}</td>
-                    <td class="py-4 px-6 text-slate-800 border-l border-slate-200">${escapeHtml(color)}</td>
+                    <td class="py-4 px-6 text-slate-800 border-l border-slate-200">
+                        <div class="flex items-center justify-center gap-2">
+                            ${it.colorHex ? `<span class="inline-block w-4 h-4 rounded-full border border-slate-300 shadow-sm" style="background:${escapeHtml(it.colorHex)}"></span>` : ''}
+                            <span>${escapeHtml(color)}</span>
+                        </div>
+                    </td>
                     <td class="py-4 px-6 text-slate-800 border-l border-slate-200">${escapeHtml(nameNumber)}</td>
                 `
 
@@ -600,35 +621,101 @@
         const modalImgContainer = document.getElementById('modalImgContainer');
         const modalTitle = document.getElementById('modalTitle');
         const modalSize = document.getElementById('modalSize');
+        const modalColorGroup = document.getElementById('modalColorGroup');
+        const modalColor = document.getElementById('modalColor');
+        const modalColorSwatch = document.getElementById('modalColorSwatch');
         const modalNameNumber = document.getElementById('modalNameNumber');
         
         let currentRow = null;
         let originalSize = '';
+        let originalColor = '';
+        let originalColorHex = '';
+        let originalImage = '';
         let originalNameNum = '';
 
-        // Standard size options to always show in dropdown
-        const sizeOptions = ['Youth-XS', 'Youth-Small', 'Youth-Medium', 'Youth-Large', 'GC Y L/XL', 'Adult-S', 'Adult-M', 'Adult-L', 'Adult-XL'];
+        const fallbackSizeOptions = ['Youth-XS', 'Youth-Small', 'Youth-Medium', 'Youth-Large', 'GC Y L/XL', 'Adult-S', 'Adult-M', 'Adult-L', 'Adult-XL'];
+
+        function ensureOption(options, value, label = value) {
+            const normalizedValue = String(value || '')
+            if (!normalizedValue) return options
+            const exists = options.some(option => String(option?.value || '').toLowerCase() === normalizedValue.toLowerCase())
+            if (exists) return options
+            return [{ value: normalizedValue, label: label || normalizedValue }, ...options]
+        }
+
+        function setModalColorSwatch(colorHex) {
+            if (!modalColorSwatch) return
+            if (colorHex) {
+                modalColorSwatch.style.backgroundColor = colorHex
+                modalColorSwatch.classList.remove('hidden')
+            } else {
+                modalColorSwatch.style.backgroundColor = 'transparent'
+                modalColorSwatch.classList.add('hidden')
+            }
+        }
+
+        function populateSizeDropdown(item) {
+            modalSize.innerHTML = ''
+
+            const actualOptions = Array.isArray(item?.optionSets?.sizes) ? item.optionSets.sizes : []
+            const fallbackOptions = fallbackSizeOptions.map(value => ({ value, label: value }))
+            const merged = ensureOption(actualOptions.length ? actualOptions : fallbackOptions, item.size, item.size)
+
+            merged.forEach(optionData => {
+                if (!optionData?.value) return
+                const option = document.createElement('option')
+                option.value = optionData.value
+                option.textContent = optionData.label || optionData.value
+                modalSize.appendChild(option)
+            })
+
+            modalSize.value = item.size || ''
+        }
+
+        function populateColorDropdown(item) {
+            const actualColors = Array.isArray(item?.optionSets?.colors) ? item.optionSets.colors : []
+            const merged = ensureOption(actualColors, item.color, item.color)
+
+            if (!merged.length || !merged[0]?.value) {
+                modalColorGroup.classList.add('hidden')
+                modalColor.innerHTML = ''
+                setModalColorSwatch('')
+                return
+            }
+
+            modalColorGroup.classList.remove('hidden')
+            modalColor.innerHTML = ''
+
+            merged.forEach(optionData => {
+                if (!optionData?.value) return
+                const option = document.createElement('option')
+                option.value = optionData.value
+                option.textContent = optionData.label || optionData.value
+                option.dataset.color = optionData.color || ''
+                option.dataset.image = optionData.image || ''
+                modalColor.appendChild(option)
+            })
+
+            modalColor.value = item.color || merged[0].value || ''
+            const selectedOption = merged.find(option => option.value === modalColor.value) || merged[0]
+            setModalColorSwatch(selectedOption?.color || item.colorHex || '')
+        }
 
         function openEditModal(item) {
             log('openEditModal', { rowKey: item?.rowKey, productName: item?.productName })
             currentRow = item
             originalSize = item.size || ''
+            originalColor = item.color || ''
+            originalColorHex = item.colorHex || ''
+            originalImage = item.image || ''
             originalNameNum = item.nameNumber || ''
 
             modalTitle.textContent = item.productName || ''
             modalImg.src = item.image || ''
             modalImgContainer.className = 'w-24 h-24 bg-slate-100 rounded-lg overflow-hidden border border-slate-200 shadow-sm'
 
-            modalSize.innerHTML = ''
-            const allOptions = new Set([item.size || '', ...sizeOptions])
-            allOptions.forEach(optVal => {
-                if (!optVal) return
-                const option = document.createElement('option')
-                option.value = optVal
-                option.textContent = optVal
-                modalSize.appendChild(option)
-            })
-            modalSize.value = item.size || ''
+            populateSizeDropdown(item)
+            populateColorDropdown(item)
             modalNameNumber.value = item.nameNumber || ''
 
             editModal.classList.remove('hidden')
@@ -653,15 +740,48 @@
         // Reset listener
         resetModalBtn.addEventListener('click', () => {
             modalSize.value = originalSize;
+            if (!modalColorGroup.classList.contains('hidden')) {
+                modalColor.value = originalColor;
+                setModalColorSwatch(originalColorHex);
+                modalImg.src = originalImage || '';
+            }
             modalNameNumber.value = originalNameNum;
         });
+
+        modalColor.addEventListener('change', () => {
+            const selectedOption = modalColor.options[modalColor.selectedIndex]
+            const nextColorHex = selectedOption?.dataset?.color || ''
+            const nextImage = selectedOption?.dataset?.image || ''
+            setModalColorSwatch(nextColorHex)
+
+            if (nextImage) {
+                modalImg.src = nextImage
+            } else {
+                modalImg.src = currentRow?.image || originalImage || ''
+            }
+
+            log('modal color changed', {
+                rowKey: currentRow?.rowKey,
+                color: modalColor.value,
+                colorHex: nextColorHex,
+                hasImageOverride: !!nextImage
+            })
+        })
 
         // Save listener
         saveModalBtn.addEventListener('click', () => {
             if (currentRow) {
                 const rowKey = currentRow.rowKey || ''
+                const selectedColorOption = !modalColorGroup.classList.contains('hidden')
+                    ? modalColor.options[modalColor.selectedIndex]
+                    : null
                 const patch = {
                     size: modalSize.value || '',
+                    color: selectedColorOption ? (modalColor.value || '') : (currentRow.color || ''),
+                    colorHex: selectedColorOption ? (selectedColorOption.dataset?.color || '') : (currentRow.colorHex || ''),
+                    image: selectedColorOption
+                        ? ((selectedColorOption.dataset?.image || '') || currentRow.image || '')
+                        : (currentRow.image || ''),
                     nameNumber: (modalNameNumber.value || '').trim()
                 }
                 log('modal save clicked', { rowKey, patch })
