@@ -41,5 +41,15 @@ The Wix CLI is a tool that allows you to work with your site locally from your c
 
 Learn more about [working with the Wix CLI](https://support.wix.com/en/article/velo-working-with-the-wix-cli-beta).
 
+## GitHub Pages (order UI iframe)
+
+The order-details UI for the dynamic items page is a static HTML app in [`docs/index.html`](docs/index.html). It is copied from [`src/iframe/dynamic-page`](src/iframe/dynamic-page).
+
+1. In GitHub: **Settings → Pages** → deploy from branch **`main`** / folder **`/docs`**.
+2. Public URL: `https://tonyboom3d.github.io/copy-of-titlewave/`
+3. After editing `src/iframe/dynamic-page`, run `npm run sync-docs-ui` and commit both files.
+
+Velo loads this URL in the page code (`IFRAME_URL` in `Items (List) (Item).q5v7m.js`).
+
 ## Invite contributors to work with you
 Git Integration & Wix CLI extends Editor X's [concurrent editing](https://support.wix.com/en/article/editor-x-about-concurrent-editing) capabilities. Invite other developers as collaborators on your [site](https://support.wix.com/en/article/inviting-people-to-contribute-to-your-site) and your [GitHub repo](https://docs.github.com/en/account-and-profile/setting-up-and-managing-your-personal-account-on-github/managing-access-to-your-personal-repositories/inviting-collaborators-to-a-personal-repository). Multiple developers can work on a site's code at once.

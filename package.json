@@ -11,6 +11,7 @@
   "scripts": {
     "postinstall": "wix sync-types",
     "dev": "wix dev",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "sync-docs-ui": "node -e \"require('fs').copyFileSync('src/iframe/dynamic-page','docs/index.html')\""
   }
 }

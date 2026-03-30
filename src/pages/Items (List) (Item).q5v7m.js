@@ -3,6 +3,7 @@ import wixLocation from 'wix-location'
 import { getFilteredProductOptions } from 'backend/editLogics.web'
 import { updateOrderLineItems } from 'backend/orderUpdates.web'
 import { getOrderForAdmin } from 'backend/editLogics.web'
+import { verifyOrderAndStatus } from 'backend/editLogics.web'
 import { authentication } from 'wix-members-frontend'
 import { checkMemberRoles } from 'backend/adminAuth.web'
 
@@ -13,6 +14,17 @@ const uid = () => `${Date.now().toString(36)}-${Math.random().toString(36).slice
 const n = x => (x || '').toString()
 
 let editState = new Map()
+
+// --- GitHub Pages iframe (UI only) ---
+// Served from repo docs/ → https://tonyboom3d.github.io/copy-of-titlewave/
+const IFRAME_URL = 'https://tonyboom3d.github.io/copy-of-titlewave/'
+const IFRAME_ORIGIN = 'https://tonyboom3d.github.io'
+const UI_HTML_ID = '#counter' // currently reusing existing HTMLComponent; can be swapped to a dedicated one later.
+
+let uiHtml = null
+let currentOrderId = ''
+let currentOrder = null
+let sessionItemsByRowKey = new Map() // rowKey -> { itemId, baseRow }
 
 const descName = d => textOr(d?.name?.translated, d?.name?.original)
 const descVal = d => textOr(
@@ -83,6 +95,72 @@ const toDropdownOptions = arr => (arr || []).map(c => ({
     label: c.description || c.value || '',
     value: c.value || ''
 }))
+
+function postToUi(msg) {
+    if (!uiHtml) return
+    try {
+        uiHtml.postMessage(msg, IFRAME_ORIGIN)
+    } catch (e) {
+        console.error('postToUi failed:', e)
+    }
+}
+
+function orderToUiState(order, { isAdminMode = false } = {}) {
+    const o = order || {}
+    const rows = buildRows(o?.lineItems || [])
+
+    sessionItemsByRowKey = new Map()
+
+    const uiItems = rows.map(r => {
+        const itemId = uid()
+        const rowKey = r._rowKey || uid()
+        const base = {
+            itemId,
+            rowKey,
+            productId: r.product_id || '',
+            productName: r.product_name || '',
+            image: extractImageUrl(r.product_image) || '',
+            size: r.product_size || '',
+            color: r.product_color || '',
+            colorHex: r.product_color_hex || '',
+            nameNumber: (r.name_number || '').toString().trim()
+        }
+        sessionItemsByRowKey.set(rowKey, { itemId, baseRow: base })
+        return base
+    })
+
+    const first = o?.recipientInfo?.contactDetails?.firstName || ''
+    const last = o?.recipientInfo?.contactDetails?.lastName || ''
+    const contactName = [first, last].filter(Boolean).join(' ')
+
+    const status = (o?.orderStatus || 'Pending').toString()
+    const statusLower = status.toLowerCase()
+    const editingAllowed =
+        !isAdminMode &&
+        (statusLower === 'pending' || statusLower === 'pending (24h)' || statusLower === '')
+
+    return {
+        order: {
+            id: o?._id || '',
+            number: o?.number || '',
+            status,
+            createdDate: o?._createdDate || o?._dateCreated || ''
+        },
+        contact: {
+            name: contactName,
+            email: n(o?.buyerInfo?.email),
+            phone: n(o?.recipientInfo?.contactDetails?.phone)
+        },
+        shipping: {
+            address: formatAddress(o?.recipientInfo?.address)
+        },
+        items: uiItems,
+        permissions: {
+            isAdminMode: !!isAdminMode,
+            editingAllowed
+        }
+    }
+}
 
 // ✅ פונקציה חדשה להצגת הריפיטר עם אנימציה
 function showRepeaterWithAnimation() {
@@ -750,6 +828,7 @@ function getStatusText(status) {
 function wireAuth() {
     const path = norm(wixLocation.path)
     const orderId = path.length ? path[path.length - 1] : ''
+    currentOrderId = orderId
 
     // ✅ בדוק אם יש admin=true בקישור
     const query = wixLocation.query
@@ -759,11 +838,9 @@ function wireAuth() {
         // ✅ מצב Admin - התחבר ובדוק הרשאות
         handleAdminAuth(orderId)
     } else {
-        // ✅ מצב רגיל - פתח Lightbox
-        wixWindow.openLightbox('AuthLightbox', { orderId }).then(res => {
-            if (!res || !res.ok) return
-            displayOrderDetails(res.order)
-        })
+        // ✅ מצב רגיל - auth בתוך ה-iframe (UI only)
+        // הנתונים יגיעו דרך הודעות TW_AUTH_SUBMIT -> verifyOrderAndStatus -> TW_AUTH_RESULT/TW_SET_STATE
+        postToUi({ type: 'TW_INIT', orderId, isAdminMode: false })
     }
 }
 
@@ -830,7 +907,11 @@ function displayOrderDetails(order, isAdminMode = false) {
     // keep your withIds() if you want, but we'll generate fresh ids in the mappers below
 
     if ($w('#title')) $w('#title').text = `Your Order Details #${o.number}:`;
-    if ($w('#counter')) $w('#counter').postMessage({ type: 'TW_COUNTDOWN', createdDate: o._createdDate });
+
+    // UI iframe state push (reuses #counter HTMLComponent for now)
+    currentOrder = o
+    const state = orderToUiState(o, { isAdminMode })
+    postToUi({ type: 'TW_SET_STATE', state })
 
     // --- admin block (replaces your previous isAdminMode handling) ---
     if (isAdminMode) {
@@ -908,6 +989,112 @@ function refreshSaveButton() {
 }
 
 $w.onReady(function () {
+    uiHtml = $w(UI_HTML_ID)
+    if (uiHtml && IFRAME_URL) {
+        try {
+            uiHtml.src = IFRAME_URL
+        } catch (e) {
+            console.error('Failed setting iframe src:', e)
+        }
+
+        uiHtml.onMessage(async (e) => {
+            const d = e?.data || {}
+            if (!d || typeof d !== 'object') return
+
+            if (d.type === 'TW_READY') {
+                // send init so the iframe knows orderId/admin
+                const query = wixLocation.query
+                const isAdminMode = query.admin === 'true'
+                const path = norm(wixLocation.path)
+                const orderId = path.length ? path[path.length - 1] : ''
+                currentOrderId = orderId
+                postToUi({ type: 'TW_INIT', orderId, isAdminMode: !!isAdminMode })
+
+                // if we already have an order loaded (admin flow), push state again
+                if (currentOrder) {
+                    const state = orderToUiState(currentOrder, { isAdminMode })
+                    postToUi({ type: 'TW_SET_STATE', state })
+                }
+                return
+            }
+
+            if (d.type === 'TW_REQUEST_STATE') {
+                const query = wixLocation.query
+                const isAdminMode = query.admin === 'true'
+                if (currentOrder) {
+                    const state = orderToUiState(currentOrder, { isAdminMode })
+                    postToUi({ type: 'TW_SET_STATE', state })
+                } else {
+                    postToUi({ type: 'TW_INIT', orderId: currentOrderId, isAdminMode: !!isAdminMode })
+                }
+                return
+            }
+
+            if (d.type === 'TW_AUTH_SUBMIT') {
+                const email = (d.email || '').toString().trim()
+                const orderNumber = (d.orderNumber || '').toString().trim()
+                if (!currentOrderId || !email || !orderNumber) {
+                    postToUi({ type: 'TW_AUTH_RESULT', ok: false, message: 'Missing order number or email' })
+                    return
+                }
+                try {
+                    const res = await verifyOrderAndStatus(currentOrderId, email, orderNumber)
+                    if (!res || !res.ok) {
+                        postToUi({ type: 'TW_AUTH_RESULT', ok: false, message: 'Access denied for the provided details' })
+                        return
+                    }
+                    currentOrder = res.order
+                    postToUi({ type: 'TW_AUTH_RESULT', ok: true })
+                    postToUi({ type: 'TW_SET_STATE', state: orderToUiState(res.order, { isAdminMode: false }) })
+                } catch (err) {
+                    console.error('verifyOrderAndStatus failed:', err)
+                    postToUi({ type: 'TW_AUTH_RESULT', ok: false, message: 'Verification failed. Please try again.' })
+                }
+                return
+            }
+
+            if (d.type === 'TW_SAVE_SUBMIT') {
+                const changes = Array.isArray(d.changes) ? d.changes : []
+                if (!currentOrderId) {
+                    postToUi({ type: 'TW_SAVE_RESULT', ok: false, message: 'Order ID not found' })
+                    return
+                }
+                if (!changes.length) {
+                    postToUi({ type: 'TW_SAVE_RESULT', ok: false, message: 'No changes to save' })
+                    return
+                }
+
+                // Build payload for backend/orderUpdates.web (same shape you used before)
+                const payload = changes.map(ch => ({
+                    itemId: (ch.itemId || '').toString() || uid(),
+                    rowKey: (ch.rowKey || '').toString(),
+                    productId: (ch.productId || '').toString(),
+                    productName: (ch.productName || '').toString(),
+                    size: (ch.size || '').toString(),
+                    color: (ch.color || '').toString(),
+                    colorHex: (ch.colorHex || '').toString(),
+                    nameNumber: (ch.nameNumber || '').toString(),
+                    image: (ch.image || '').toString()
+                }))
+
+                try {
+                    const result = await updateOrderLineItems(currentOrderId, payload)
+                    if (result && result.ok) {
+                        // lock editing in UI once saved (waiting for approval)
+                        postToUi({ type: 'TW_SAVE_RESULT', ok: true, newStatus: result.newStatus || '' })
+                        postToUi({ type: 'TW_LOCK_EDITING', locked: true, reason: 'waiting for approval' })
+                        return
+                    }
+                    postToUi({ type: 'TW_SAVE_RESULT', ok: false, message: (result && result.message) ? result.message : 'Failed to update order' })
+                } catch (err) {
+                    console.error('updateOrderLineItems failed:', err)
+                    postToUi({ type: 'TW_SAVE_RESULT', ok: false, message: 'Error saving changes' })
+                }
+                return
+            }
+        })
+    }
+
     // ✅ הסתר ריפיטר וחץ בהתחלה
     if ($w('#editRepeater')) {
         $w('#editRepeater').data = []
