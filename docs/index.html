@@ -394,6 +394,20 @@
             LOCK_EDITING: 'TW_LOCK_EDITING'
         }
 
+        const LOG_NS = '[TW iframe UI]'
+
+        function log(...args) {
+            console.log(LOG_NS, ...args)
+        }
+
+        function maskEmail(email) {
+            const s = String(email || '').trim()
+            if (!s) return '(empty)'
+            const at = s.indexOf('@')
+            if (at < 1) return `${s.slice(0, 2)}...`
+            return `${s.slice(0, 2)}...@${s.slice(at + 1)}`
+        }
+
         let hostInit = { orderId: '', isAdminMode: false }
         let uiState = null
         let lockedEditing = false
@@ -401,13 +415,15 @@
 
         function postToHost(payload) {
             try {
+                log('-> host', payload?.type || '(no-type)', payload)
                 window.parent.postMessage(payload, '*')
             } catch (e) {
-                console.error('postToHost failed:', e)
+                console.error(LOG_NS, 'postToHost failed:', e)
             }
         }
 
         // announce ready
+        log('iframe booted; sending TW_READY')
         postToHost({ type: HOST_TYPES.READY })
 
         // --- Save Button & Checkbox Logic ---
@@ -487,6 +503,13 @@
             const contact = state?.contact || {}
             const shipping = state?.shipping || {}
             const permissions = state?.permissions || {}
+            log('setOrderMetaFromState', {
+                orderNumber: order?.number,
+                status: order?.status,
+                itemCount: Array.isArray(state?.items) ? state.items.length : 0,
+                isAdminMode: !!permissions?.isAdminMode,
+                editingAllowed: permissions?.editingAllowed
+            })
 
             const orderNumEl = document.getElementById('orderNumber')
             if (orderNumEl) orderNumEl.textContent = order?.number ? `#${order.number}` : '#—'
@@ -521,6 +544,7 @@
             tbody.innerHTML = ''
 
             const items = Array.isArray(state?.items) ? state.items : []
+            log('renderItemsTable', { itemCount: items.length })
             items.forEach((it) => {
                 const row = document.createElement('tr')
                 row.className = 'hover:bg-slate-50 transition-colors cursor-pointer group'
@@ -545,6 +569,7 @@
                 `
 
                 row.addEventListener('click', () => {
+                    log('row click', { rowKey: it.rowKey, lockedEditing, isAdminMode: hostInit.isAdminMode })
                     if (lockedEditing) return
                     if (hostInit.isAdminMode) return
                     openEditModal(it)
@@ -585,6 +610,7 @@
         const sizeOptions = ['Youth-XS', 'Youth-Small', 'Youth-Medium', 'Youth-Large', 'GC Y L/XL', 'Adult-S', 'Adult-M', 'Adult-L', 'Adult-XL'];
 
         function openEditModal(item) {
+            log('openEditModal', { rowKey: item?.rowKey, productName: item?.productName })
             currentRow = item
             originalSize = item.size || ''
             originalNameNum = item.nameNumber || ''
@@ -638,6 +664,7 @@
                     size: modalSize.value || '',
                     nameNumber: (modalNameNumber.value || '').trim()
                 }
+                log('modal save clicked', { rowKey, patch })
                 draftByRowKey.set(rowKey, { ...(draftByRowKey.get(rowKey) || {}), ...patch })
 
                 // optimistic update UI table
@@ -667,6 +694,12 @@
         const closeStatusModalBtn = document.getElementById('closeStatusModalBtn');
 
         saveButton.addEventListener('click', () => {
+            log('save button clicked', {
+                disabled: saveButton.hasAttribute('disabled'),
+                lockedEditing,
+                isAdminMode: hostInit.isAdminMode,
+                hasState: !!uiState
+            })
             if (saveButton.hasAttribute('disabled')) return
             if (lockedEditing) return
             if (hostInit.isAdminMode) return
@@ -691,6 +724,7 @@
             }
 
             if (!changes.length) return
+            log('save submitting changes', { changeCount: changes.length, rowKeys: changes.map(x => x.rowKey) })
 
             // Show status modal (loading)
             statusModal.classList.remove('hidden')
@@ -724,10 +758,17 @@
         const authBtnSpinner = document.getElementById('authBtnSpinner');
 
         authSubmitBtn.addEventListener('click', () => {
+            log('verify button clicked')
             if (authSubmitBtn.hasAttribute('disabled')) return;
 
             const orderVal = authOrderNumber.value.trim();
             const emailVal = authEmail.value.trim();
+            log('auth form values', {
+                orderNumberLength: orderVal.length,
+                email: maskEmail(emailVal),
+                hostOrderId: hostInit.orderId,
+                isAdminMode: hostInit.isAdminMode
+            })
             
             // Reset error states
             authErrorMsg.classList.add('hidden');
@@ -753,6 +794,7 @@
             authBtnText.classList.add('opacity-0');
             authBtnSpinner.classList.remove('hidden');
 
+            log('sending TW_AUTH_SUBMIT')
             postToHost({ type: HOST_TYPES.AUTH_SUBMIT, email: emailVal, orderNumber: orderVal })
         });
 
@@ -771,9 +813,11 @@
         window.addEventListener('message', (ev) => {
             const d = ev?.data || {}
             if (!d || typeof d !== 'object') return
+            log('<- host', d.type || '(no-type)', d)
 
             if (d.type === HOST_TYPES.INIT) {
                 hostInit = { orderId: d.orderId || '', isAdminMode: !!d.isAdminMode }
+                log('received TW_INIT', hostInit)
                 // admin mode: no auth modal
                 if (hostInit.isAdminMode) {
                     authModal.classList.add('hidden')
@@ -783,6 +827,7 @@
             }
 
             if (d.type === HOST_TYPES.SET_STATE) {
+                log('received TW_SET_STATE')
                 uiState = d.state || null
                 if (uiState) {
                     setOrderMetaFromState(uiState)
@@ -808,6 +853,7 @@
             }
 
             if (d.type === HOST_TYPES.AUTH_RESULT) {
+                log('received TW_AUTH_RESULT', { ok: !!d.ok, message: d.message || '' })
                 // Remove Loading State
                 authSubmitBtn.removeAttribute('disabled')
                 authSubmitBtn.classList.remove('opacity-80', 'cursor-not-allowed')
@@ -824,6 +870,7 @@
             }
 
             if (d.type === HOST_TYPES.SAVE_RESULT) {
+                log('received TW_SAVE_RESULT', { ok: !!d.ok, message: d.message || '', newStatus: d.newStatus || '' })
                 if (d.ok) {
                     loadingState.classList.add('hidden')
                     successState.classList.remove('hidden')
@@ -839,6 +886,7 @@
             }
 
             if (d.type === HOST_TYPES.LOCK_EDITING) {
+                log('received TW_LOCK_EDITING', { locked: !!d.locked, reason: d.reason || '' })
                 lockedEditing = !!d.locked
                 if (lockedEditing) {
                     // prevent saving
@@ -851,7 +899,10 @@
         })
 
         // In case the host missed our initial ready, ask for state soon
-        setTimeout(() => postToHost({ type: HOST_TYPES.REQUEST_STATE }), 300)
+        setTimeout(() => {
+            log('sending TW_REQUEST_STATE fallback')
+            postToHost({ type: HOST_TYPES.REQUEST_STATE })
+        }, 300)
 
     </script>
 </body>
