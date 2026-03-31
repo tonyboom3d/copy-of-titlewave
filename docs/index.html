@@ -88,7 +88,7 @@
                     <span id="authErrorText">Incorrect order number or email. Please check your details and try again.</span>
             </div>
 
-            <div class="flex flex-col gap-4 mb-8">
+            <div id="authCustomerFields" class="flex flex-col gap-4 mb-8">
                 <div class="flex flex-col gap-1.5">
                     <label class="text-slate-700 font-semibold text-sm">Order Number <span class="text-red-500">*</span></label>
                     <input type="text" id="authOrderNumber" placeholder="e.g. 10011" class="w-full px-4 py-3 text-slate-800 bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 rounded-xl transition-all shadow-sm">
@@ -96,6 +96,13 @@
                 <div class="flex flex-col gap-1.5">
                     <label class="text-slate-700 font-semibold text-sm">Email Address <span class="text-red-500">*</span></label>
                     <input type="email" id="authEmail" placeholder="e.g. test@gg.com" class="w-full px-4 py-3 text-slate-800 bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 rounded-xl transition-all shadow-sm">
+                </div>
+            </div>
+
+            <div id="authAdminFields" class="hidden flex flex-col gap-4 mb-8">
+                <div class="flex flex-col gap-1.5">
+                    <label class="text-slate-700 font-semibold text-sm">Admin Code <span class="text-red-500">*</span></label>
+                    <input type="password" id="authAdminCode" placeholder="Enter admin code" class="w-full px-4 py-3 text-slate-800 bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 rounded-xl transition-all shadow-sm">
                 </div>
             </div>
 
@@ -110,9 +117,15 @@
                 </button>
                 
                 <!-- Demo Hint -->
-                <p class="text-center text-xs text-slate-400 mt-2">
+                <p id="authHintText" class="text-center text-xs text-slate-400 mt-2">
                     Hint: Enter your order details to continue
                 </p>
+                <button id="adminLoginToggleBtn" type="button" class="text-center text-xs text-slate-500 hover:text-slate-700 underline underline-offset-2 transition-colors">
+                    Admin login
+                </button>
+                <button id="customerLoginToggleBtn" type="button" class="hidden text-center text-xs text-slate-500 hover:text-slate-700 underline underline-offset-2 transition-colors">
+                    Back to customer login
+                </button>
             </div>
         </div>
     </div>
@@ -430,6 +443,8 @@
         let lockedEditing = false
         let lockedByHost = false
         let lockedByTimer = false
+        let bypassTimeWindow = false
+        let authMode = 'customer'
         let draftByRowKey = new Map() // rowKey -> partial fields
         let baseItemsByRowKey = new Map()
 
@@ -488,7 +503,6 @@
             const canSave =
                 !!termsCheckbox.checked &&
                 !lockedEditing &&
-                !hostInit.isAdminMode &&
                 hasActualChanges()
 
             if (canSave) {
@@ -505,7 +519,7 @@
         termsCheckbox.addEventListener('change', refreshSaveButtonState);
 
         function syncEditingLockState() {
-            lockedEditing = !!hostInit.isAdminMode || lockedByHost || lockedByTimer
+            lockedEditing = lockedByHost || lockedByTimer
             refreshSaveButtonState()
         }
 
@@ -539,7 +553,7 @@
             elProgressBar.style.width = `${(safeSeconds / totalDuration) * 100}%`;
 
             if (elTimerStatusMessage) {
-                if (safeSeconds <= 0) {
+                if (!bypassTimeWindow && safeSeconds <= 0) {
                     elTimerStatusMessage.textContent = 'The 24-hour editing window has expired.'
                     elTimerStatusMessage.classList.remove('hidden')
                 } else {
@@ -563,7 +577,7 @@
 
             renderTimer(secondsRemaining)
 
-            const nextLockedByTimer = !!timerDeadlineMs && secondsRemaining <= 0
+            const nextLockedByTimer = !bypassTimeWindow && !!timerDeadlineMs && secondsRemaining <= 0
             if (nextLockedByTimer !== lockedByTimer) {
                 lockedByTimer = nextLockedByTimer
                 syncEditingLockState()
@@ -574,8 +588,9 @@
             }
         }
 
-        function startTimer(createdDateStr) {
+        function startTimer(createdDateStr, shouldBypassTimeWindow = false) {
             stopTimer()
+            bypassTimeWindow = !!shouldBypassTimeWindow
 
             const created = createdDateStr ? new Date(createdDateStr) : null
             if (!created || Number.isNaN(created.getTime())) {
@@ -625,7 +640,8 @@
             if (addrEl) addrEl.textContent = shipping?.address ? String(shipping.address) : '—'
 
             const createdDate = order?.createdDate || ''
-            startTimer(createdDate)
+            hostInit.isAdminMode = !!permissions?.isAdminMode
+            startTimer(createdDate, !!permissions?.bypassTimeWindow)
 
             lockedByHost = permissions.editingAllowed === false
             syncEditingLockState()
@@ -673,7 +689,6 @@
                 row.addEventListener('click', () => {
                     log('row click', { rowKey: it.rowKey, lockedEditing, isAdminMode: hostInit.isAdminMode })
                     if (lockedEditing) return
-                    if (hostInit.isAdminMode) return
                     openEditModal(it)
                 })
 
@@ -942,7 +957,6 @@
             })
             if (saveButton.hasAttribute('disabled')) return
             if (lockedEditing) return
-            if (hostInit.isAdminMode) return
             if (!uiState || !Array.isArray(uiState.items)) return
 
             const changes = []
@@ -994,16 +1008,76 @@
         // --- Auth Modal Logic ---
         const authModal = document.getElementById('authModal');
         const authSubmitBtn = document.getElementById('authSubmitBtn');
+        const authCustomerFields = document.getElementById('authCustomerFields');
+        const authAdminFields = document.getElementById('authAdminFields');
         const authOrderNumber = document.getElementById('authOrderNumber');
         const authEmail = document.getElementById('authEmail');
+        const authAdminCode = document.getElementById('authAdminCode');
         const authErrorMsg = document.getElementById('authErrorMsg');
         const authErrorText = document.getElementById('authErrorText');
         const authBtnText = document.getElementById('authBtnText');
         const authBtnSpinner = document.getElementById('authBtnSpinner');
+        const authHintText = document.getElementById('authHintText');
+        const adminLoginToggleBtn = document.getElementById('adminLoginToggleBtn');
+        const customerLoginToggleBtn = document.getElementById('customerLoginToggleBtn');
+
+        function setAuthMode(nextMode) {
+            authMode = nextMode === 'admin-code' ? 'admin-code' : 'customer'
+            authErrorMsg.classList.add('hidden')
+            authOrderNumber.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
+            authEmail.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
+            authAdminCode.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
+
+            if (authMode === 'admin-code') {
+                authCustomerFields.classList.add('hidden')
+                authAdminFields.classList.remove('hidden')
+                adminLoginToggleBtn.classList.add('hidden')
+                customerLoginToggleBtn.classList.remove('hidden')
+                authBtnText.textContent = 'Login as Admin'
+                authHintText.textContent = 'Enter the admin code to bypass customer verification.'
+            } else {
+                authCustomerFields.classList.remove('hidden')
+                authAdminFields.classList.add('hidden')
+                adminLoginToggleBtn.classList.remove('hidden')
+                customerLoginToggleBtn.classList.add('hidden')
+                authBtnText.textContent = 'Submit & Verify'
+                authHintText.textContent = 'Hint: Enter your order details to continue'
+            }
+        }
+
+        adminLoginToggleBtn.addEventListener('click', () => setAuthMode('admin-code'))
+        customerLoginToggleBtn.addEventListener('click', () => setAuthMode('customer'))
 
         authSubmitBtn.addEventListener('click', () => {
             log('verify button clicked')
             if (authSubmitBtn.hasAttribute('disabled')) return;
+
+            authErrorMsg.classList.add('hidden');
+            authOrderNumber.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
+            authEmail.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
+            authAdminCode.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
+
+            if (authMode === 'admin-code') {
+                const adminCodeVal = authAdminCode.value.trim();
+                log('admin auth form values', {
+                    hasAdminCode: !!adminCodeVal,
+                    hostOrderId: hostInit.orderId
+                })
+
+                if (adminCodeVal === '') {
+                    authAdminCode.classList.add('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
+                    return;
+                }
+
+                authSubmitBtn.setAttribute('disabled', 'true');
+                authSubmitBtn.classList.add('opacity-80', 'cursor-not-allowed');
+                authBtnText.classList.add('opacity-0');
+                authBtnSpinner.classList.remove('hidden');
+
+                log('sending TW_AUTH_SUBMIT admin-code')
+                postToHost({ type: HOST_TYPES.AUTH_SUBMIT, mode: 'admin-code', adminCode: adminCodeVal })
+                return
+            }
 
             const orderVal = authOrderNumber.value.trim();
             const emailVal = authEmail.value.trim();
@@ -1013,12 +1087,6 @@
                 hostOrderId: hostInit.orderId,
                 isAdminMode: hostInit.isAdminMode
             })
-            
-            // Reset error states
-            authErrorMsg.classList.add('hidden');
-            authOrderNumber.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
-            authEmail.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
-
             // Basic validation for empty fields
             let hasError = false;
             if(orderVal === '') {
@@ -1051,6 +1119,11 @@
         authEmail.addEventListener('input', () => {
             authErrorMsg.classList.add('hidden');
             authEmail.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
+        });
+
+        authAdminCode.addEventListener('input', () => {
+            authErrorMsg.classList.add('hidden');
+            authAdminCode.classList.remove('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
         });
 
         // --- Incoming messages from host ---
@@ -1103,8 +1176,12 @@
                 if (!d.ok) {
                     if (authErrorText && d.message) authErrorText.textContent = String(d.message)
                     authErrorMsg.classList.remove('hidden')
-                    authOrderNumber.classList.add('border-red-500')
-                    authEmail.classList.add('border-red-500')
+                    if (authMode === 'admin-code') {
+                        authAdminCode.classList.add('border-red-500')
+                    } else {
+                        authOrderNumber.classList.add('border-red-500')
+                        authEmail.classList.add('border-red-500')
+                    }
                 }
                 return
             }
