@@ -338,7 +338,7 @@
 
         <!-- Edit Product Modal -->
         <div id="editModal" class="fixed inset-0 bg-slate-900/40 z-50 hidden flex items-center justify-center backdrop-blur-sm opacity-0 transition-opacity duration-300">
-            <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden transform scale-95 transition-transform duration-300 mx-4" id="editModalContent">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden transform scale-95 transition-transform duration-300 mx-4 max-h-[90vh] overflow-y-auto" id="editModalContent">
                 <!-- Header -->
                 <div class="flex justify-between items-center p-4 border-b border-slate-100">
                     <h3 class="font-bold text-lg text-slate-800">Edit Details</h3>
@@ -348,9 +348,9 @@
                 </div>
                 
                 <!-- Body -->
-                <div class="p-6 flex gap-6 items-start">
+                <div class="p-5 md:p-6 flex flex-col md:flex-row gap-5 md:gap-6 items-start">
                     <!-- Left Column (Image & Reset) -->
-                    <div class="flex flex-col items-center gap-4 w-1/3 shrink-0">
+                    <div class="flex flex-col items-center gap-4 w-full md:w-1/3 shrink-0">
                         <span class="text-slate-500 font-medium">X1</span>
                         <div class="w-24 h-24 bg-black rounded-lg overflow-hidden border border-slate-200 shadow-sm" id="modalImgContainer">
                             <img id="modalImg" src="" alt="Product" class="w-full h-full object-cover">
@@ -362,7 +362,7 @@
                     </div>
                     
                     <!-- Right Column (Inputs) -->
-                    <div class="flex flex-col flex-1 gap-5 w-full">
+                    <div class="flex flex-col flex-1 gap-5 w-full min-w-0">
                         <h4 id="modalTitle" class="text-slate-800 font-medium text-lg leading-tight">Soflo Hockey Jersey - Black</h4>
                         
                         <!-- Size Dropdown -->
@@ -400,14 +400,14 @@
                             <input type="text" id="modalNameNumber" class="w-full border border-slate-300 rounded-md px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 shadow-sm" value="Test 28">
                         </div>
 
-                        <div id="modalChangesPanel" class="hidden rounded-xl border border-amber-200 bg-amber-50/80 p-4">
-                            <div class="flex items-center gap-2 mb-3">
-                                <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 text-amber-700">
+                        <div id="modalChangesPanel" class="hidden rounded-xl border border-amber-200 bg-amber-50/80 p-4 md:p-5">
+                            <div class="flex items-start gap-2.5 mb-4">
+                                <span class="inline-flex items-center justify-center w-8 h-8 rounded-full bg-amber-100 text-amber-700 shrink-0">
                                     <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
                                 </span>
-                                <div>
-                                    <p class="text-sm font-bold text-amber-900">Change summary</p>
-                                    <p class="text-xs text-amber-700">Review what was changed from the original order.</p>
+                                <div class="min-w-0">
+                                    <p class="text-sm md:text-base font-bold text-amber-900">Change summary</p>
+                                    <p class="text-xs md:text-sm text-amber-700 leading-relaxed">Review what was changed from the original order.</p>
                                 </div>
                             </div>
                             <div id="modalChangesList" class="space-y-2.5"></div>
@@ -899,28 +899,32 @@
 
         function makeDiffRow(label, fromValue, toValue, { fromSwatch = '', toSwatch = '' } = {}) {
             const row = document.createElement('div')
-            row.className = 'grid grid-cols-[96px_1fr_auto_1fr] items-center gap-2 rounded-lg bg-white/80 border border-amber-100 px-3 py-2'
+            row.className = 'rounded-xl bg-white/90 border border-amber-100 px-3 py-3 md:px-4'
 
             const fromChip = `
-                <div class="min-w-0 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm text-slate-700">
+                <div class="w-full min-w-0 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm text-slate-700">
                     ${fromSwatch ? `<span class="inline-block w-3.5 h-3.5 rounded-full border border-slate-300 shrink-0" style="background:${escapeHtml(fromSwatch)}"></span>` : ''}
                     <span class="truncate">${escapeHtml(fromValue || 'Empty')}</span>
                 </div>
             `
             const toChip = `
-                <div class="min-w-0 inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-100/70 px-2.5 py-2 text-sm font-medium text-amber-900">
+                <div class="w-full min-w-0 inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-100/70 px-3 py-2.5 text-sm font-medium text-amber-900">
                     ${toSwatch ? `<span class="inline-block w-3.5 h-3.5 rounded-full border border-amber-300 shrink-0" style="background:${escapeHtml(toSwatch)}"></span>` : ''}
                     <span class="truncate">${escapeHtml(toValue || 'Empty')}</span>
                 </div>
             `
 
             row.innerHTML = `
-                <span class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">${escapeHtml(label)}</span>
-                ${fromChip}
-                <span class="text-amber-500 flex items-center justify-center">
-                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
-                </span>
-                ${toChip}
+                <div class="flex flex-col gap-3">
+                    <span class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">${escapeHtml(label)}</span>
+                    <div class="flex flex-col md:grid md:grid-cols-[1fr_auto_1fr] gap-2 md:gap-3 items-stretch md:items-center">
+                        ${fromChip}
+                        <span class="text-amber-500 flex items-center justify-center py-1 md:py-0">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
+                        </span>
+                        ${toChip}
+                    </div>
+                </div>
             `
             return row
         }
@@ -990,6 +994,20 @@
             return [{ value: normalizedValue, label: label || normalizedValue }, ...options]
         }
 
+        function findColorOption(options, value, label = '') {
+            const valueLower = String(value || '').toLowerCase()
+            const labelLower = String(label || '').toLowerCase()
+
+            return (options || []).find(option => {
+                const optionValue = String(option?.value || '').toLowerCase()
+                const optionLabel = String(option?.label || option?.value || '').toLowerCase()
+                return (
+                    (!!valueLower && (optionValue === valueLower || optionLabel === valueLower)) ||
+                    (!!labelLower && (optionValue === labelLower || optionLabel === labelLower))
+                )
+            }) || null
+        }
+
         function setModalColorSwatch(colorHex) {
             if (!modalColorSwatch) return
             if (colorHex) {
@@ -1044,7 +1062,10 @@
             })
 
             modalColor.value = item.color || merged[0].value || ''
-            const selectedOption = merged.find(option => option.value === modalColor.value) || merged[0]
+            const selectedOption = findColorOption(merged, item.color, item.colorLabel || item.color) || merged[0]
+            if (selectedOption?.value) {
+                modalColor.value = selectedOption.value
+            }
             setModalColorSwatch(selectedOption?.color || item.colorHex || '')
         }
 
@@ -1273,6 +1294,16 @@
         const adminLoginToggleBtn = document.getElementById('adminLoginToggleBtn');
         const customerLoginToggleBtn = document.getElementById('customerLoginToggleBtn');
 
+        function finishAuthLoadingWithDelay(callback) {
+            window.setTimeout(() => {
+                authSubmitBtn.removeAttribute('disabled')
+                authSubmitBtn.classList.remove('opacity-80', 'cursor-not-allowed')
+                authBtnText.classList.remove('opacity-0')
+                authBtnSpinner.classList.add('hidden')
+                if (typeof callback === 'function') callback()
+            }, 1000)
+        }
+
         function setAuthMode(nextMode) {
             authMode = nextMode === 'admin-code' ? 'admin-code' : 'customer'
             authErrorMsg.classList.add('hidden')
@@ -1422,22 +1453,18 @@
 
             if (d.type === HOST_TYPES.AUTH_RESULT) {
                 log('received TW_AUTH_RESULT', { ok: !!d.ok, message: d.message || '' })
-                // Remove Loading State
-                authSubmitBtn.removeAttribute('disabled')
-                authSubmitBtn.classList.remove('opacity-80', 'cursor-not-allowed')
-                authBtnText.classList.remove('opacity-0')
-                authBtnSpinner.classList.add('hidden')
-
-                if (!d.ok) {
-                    if (authErrorText && d.message) authErrorText.textContent = String(d.message)
-                    authErrorMsg.classList.remove('hidden')
-                    if (authMode === 'admin-code') {
-                        authAdminCode.classList.add('border-red-500')
-                    } else {
-                        authOrderNumber.classList.add('border-red-500')
-                        authEmail.classList.add('border-red-500')
+                finishAuthLoadingWithDelay(() => {
+                    if (!d.ok) {
+                        if (authErrorText && d.message) authErrorText.textContent = String(d.message)
+                        authErrorMsg.classList.remove('hidden')
+                        if (authMode === 'admin-code') {
+                            authAdminCode.classList.add('border-red-500')
+                        } else {
+                            authOrderNumber.classList.add('border-red-500')
+                            authEmail.classList.add('border-red-500')
+                        }
                     }
-                }
+                })
                 return
             }
 
