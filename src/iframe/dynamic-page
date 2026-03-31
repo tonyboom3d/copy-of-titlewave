@@ -722,6 +722,12 @@
             return normalized
         }
 
+        function getItemBadgeLabel(item) {
+            const statusLabel = formatStatusForDisplay(item?.status || '')
+            if (statusLabel && statusLabel !== 'Open for edits') return statusLabel
+            return isItemChanged(item) ? 'Changed' : ''
+        }
+
         function getStatusMeta(status) {
             const normalized = normalizeStatus(status)
             const lower = normalized.toLowerCase()
@@ -1082,8 +1088,7 @@
                 const colorHex = mergedItem.colorHex || ''
                 const nameNumber = mergedItem.nameNumber || ''
                 const playerLastName = mergedItem.playerLastName || ''
-                const dirty = isItemChanged(mergedItem)
-                const changeTag = mergedItem?.lastChange?.label || (dirty ? 'Changed' : '')
+                const changeTag = getItemBadgeLabel(mergedItem)
 
                 row.innerHTML = `
                     <td class="py-3 px-6">
