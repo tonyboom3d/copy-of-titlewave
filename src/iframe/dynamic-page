@@ -1068,10 +1068,12 @@
                 const badgeClasses = getItemBadgeClasses(changeTag)
 
                 row.innerHTML = `
-                    <td class="py-3 px-6">
-                        <div class="relative w-16 h-16 bg-slate-100 rounded mx-auto overflow-hidden border border-slate-200">
-                            ${changeTag ? `<span class="absolute top-1 right-1 z-10 ${badgeClasses} text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm whitespace-nowrap max-w-[90px] truncate block">${escapeHtml(changeTag)}</span>` : ''}
-                            ${imgUrl ? `<img src="${imgUrl}" alt="" class="w-full h-full object-cover opacity-90" onerror="this.style.display='none'">` : ''}
+                    <td class="py-3 px-4">
+                        <div class="flex flex-col items-center gap-1.5">
+                            <div class="w-16 h-16 bg-slate-100 rounded overflow-hidden border border-slate-200 shrink-0">
+                                ${imgUrl ? `<img src="${imgUrl}" alt="" class="w-full h-full object-cover opacity-90" onerror="this.style.display='none'">` : ''}
+                            </div>
+                            ${changeTag ? `<span class="inline-block ${badgeClasses} text-[10px] font-bold px-2 py-0.5 rounded-full shadow-sm whitespace-nowrap leading-tight">${escapeHtml(changeTag)}</span>` : ''}
                         </div>
                     </td>
                     <td class="py-4 px-6 text-slate-800 border-l border-slate-200">${escapeHtml(productName)}</td>
