@@ -68,6 +68,10 @@
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased selection:bg-brand-100 selection:text-brand-900 overflow-hidden">
 
+    <div id="twVersionBadge" class="fixed bottom-2 left-2 z-[999] text-[11px] leading-none text-slate-400 bg-white/70 border border-slate-200 rounded-full px-2 py-1 backdrop-blur">
+        v—
+    </div>
+
     <!-- Auth / Verification Modal -->
     <div id="authModal" class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm transition-opacity duration-500">
         <div class="bg-white w-full max-w-md p-8 shadow-2xl rounded-2xl relative mx-4 transform transition-transform duration-300">
@@ -559,6 +563,7 @@
         }
 
         const LOG_NS = '[TW iframe UI]'
+        const UI_VERSION = '2026-03-31.1'
         function log(...args) {
             console.log(LOG_NS, ...args)
         }
@@ -570,6 +575,12 @@
             if (at < 1) return `${s.slice(0, 2)}...`
             return `${s.slice(0, 2)}...@${s.slice(at + 1)}`
         }
+
+        // Version badge (helps verify GitHub Pages deploy)
+        try {
+            const badge = document.getElementById('twVersionBadge')
+            if (badge) badge.textContent = `v${UI_VERSION}`
+        } catch (e) {}
 
         function readAdminSession() {
             return null

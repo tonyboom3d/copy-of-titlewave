@@ -1,0 +1,84 @@
+import wixData from 'wix-data'
+
+const COLLECTION = 'Stores/Orders'
+const STATUS_COLLECTION = 'ordersStatus'
+const FIELDS = ['_id','number','lineItems','paymentStatus','shippingInfo','customField','_updatedDate','buyerNote','_dateCreated','buyerInfo','totals','fulfillmentStatus']
+
+export async function fetchOrdersByIds(ids = []) {
+  if (!Array.isArray(ids) || ids.length === 0) return []
+  const uniq = Array.from(new Set(ids.map(String)))
+  const chunks = []
+  for (let i = 0; i < uniq.length; i += 100) chunks.push(uniq.slice(i, i + 100))
+  let found = []
+  for (const part of chunks) {
+    const page = await wixData.query(COLLECTION).hasSome('_id', part).limit(100).find({ suppressAuth: true, omitTotalCount: true })
+    if (Array.isArray(page.items) && page.items.length) found = found.concat(page.items)
+  }
+  
+  const byId = new Map(found.map(x => [String(x._id), x]))
+  const projected = uniq.map(id => {
+    const src = byId.get(String(id))
+    if (!src) return null
+    const o = {}
+    for (const k of FIELDS) if (src[k] !== undefined) o[k] = src[k]
+    return o
+  }).filter(Boolean)
+  return projected
+}
+
+export async function syncOrderNumbersToStatusRecords(orders = []) {
+  if (!Array.isArray(orders) || orders.length === 0) {
+    return { ok: true, scanned: 0, updated: 0 }
+  }
+
+  const validOrders = orders
+    .map(order => ({
+      orderId: String(order?._id || '').trim(),
+      orderNumber: String(order?.number || '').trim()
+    }))
+    .filter(order => order.orderId && order.orderNumber)
+
+  if (!validOrders.length) {
+    return { ok: true, scanned: 0, updated: 0 }
+  }
+
+  const orderIds = Array.from(new Set(validOrders.map(order => order.orderId)))
+  const chunks = []
+  for (let i = 0; i < orderIds.length; i += 100) chunks.push(orderIds.slice(i, i + 100))
+
+  const records = []
+  for (const part of chunks) {
+    const page = await wixData.query(STATUS_COLLECTION)
+      .hasSome('orderId', part)
+      .limit(100)
+      .find({ suppressAuth: true, suppressHooks: true })
+    if (Array.isArray(page.items) && page.items.length) records.push(...page.items)
+  }
+
+  const recordByOrderId = new Map(records.map(record => [String(record?.orderId || ''), record]))
+  let updated = 0
+
+  for (const order of validOrders) {
+    const record = recordByOrderId.get(order.orderId)
+    if (!record) continue
+    if (String(record?.orderNumber || '').trim() === order.orderNumber) continue
+
+    await wixData.update(
+      STATUS_COLLECTION,
+      {
+        ...record,
+        orderNumber: order.orderNumber
+      },
+      { suppressAuth: true, suppressHooks: true }
+    )
+    updated += 1
+  }
+
+  return {
+    ok: true,
+    scanned: validOrders.length,
+    updated
+  }
+}
+
+

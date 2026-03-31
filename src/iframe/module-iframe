@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=900, initial-scale=1.0" />
+    <title>Orders Module</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet" />
+    <style>
+      :root{
+        --bg:#f6faff;--panel:#fff;--muted:#5b6b8b;--text:#0f172a;
+        --accent:#2EACFB;--accent-2:#95B9FF;--border:#dbeafe;--head:#eff6ff;
+        --shadow:0 6px 18px rgba(2,132,199,.08)
+      }
+      *{box-sizing:border-box}
+      html,body{margin:0;padding:0;width:900px;height:700px;overflow:hidden;
+        background:linear-gradient(180deg,#fff 0%,var(--bg) 100%);
+        color:var(--text);font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif}
+      .wrap{position:relative;width:900px;height:700px;display:grid;grid-template-rows:64px 1fr 56px;gap:12px;padding:16px}
+
+      .controls { display: grid; grid-template-columns: 1fr 140px auto; gap: 12px; align-items: end }
+
+      .field{position:relative}
+      .label{position:absolute;top:-9px;left:12px;padding:0 6px;font-size:11px;color:var(--muted);background:var(--bg)}
+      input[type="text"]{width:100%;height:44px;background:var(--panel);color:var(--text);
+        border:1px solid var(--border);border-radius:12px;outline:none;padding:0 14px;box-shadow:var(--shadow)}
+      input[type="text"]::placeholder{color:#7a8ba8}
+
+      .btn{height:44px;display:inline-flex;align-items:center;gap:10px;padding:0 16px;border-radius:12px;border:1px solid transparent;
+        background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;font-weight:700;letter-spacing:.3px;
+        cursor:pointer;user-select:none;box-shadow:var(--shadow)}
+      .btn:disabled{opacity:.55;cursor:not-allowed;animation:none}
+      .btn.ready{animation:softPulse 2.2s ease-in-out infinite}
+      @keyframes softPulse{0%,100%{transform:translateZ(0) scale(1)}50%{transform:translateZ(0) scale(1.012)}}
+
+      .table-wrap{background:var(--panel);border:1px solid var(--border);border-radius:14px;overflow:hidden;display:grid;grid-template-rows:auto 1fr;box-shadow:var(--shadow)}
+      .toolbar{display:flex;align-items:center;justify-content:space-between;padding:10px 12px;border-bottom:1px solid var(--border);gap:8px;background:#fff}
+      .toolbar-left{display:flex;align-items:center;gap:10px;color:var(--muted);font-size:12px}
+      .toolbar-right{display:flex;align-items:center;gap:8px}
+      .search{height:36px;width:260px;background:#fff;border:1px solid var(--border);border-radius:10px;padding:0 10px;color:var(--text)}
+
+      .scroller{overflow:auto}
+      table{width:100%;border-collapse:collapse;table-layout:fixed}
+      thead th{position:sticky;top:0;background:var(--head);z-index:1;border-bottom:1px solid var(--border)}
+      th,td{text-align:left;padding:12px 12px;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;border-bottom:1px solid #eef2ff}
+      th:first-child,td:first-child{width:42px}
+      th:nth-child(2),td:nth-child(2){width:120px}
+      th:nth-child(3),td:nth-child(3){width:180px}
+      th:nth-child(4),td:nth-child(4){width:220px}
+      th:nth-child(5),td:nth-child(5){width:120px}
+      th:nth-child(6),td:nth-child(6){width:110px}
+      th:nth-child(7),td:nth-child(7){width:150px}
+
+      .status{padding:4px 8px;border-radius:999px;font-size:12px;border:1px solid #e2e8f0}
+      .status.paid{background:#e8f7f0;color:#065f46}
+      .status.pending{background:#fff7e6;color:#92400e}
+      .status.canceled{background:#fde8e8;color:#7f1d1d}
+
+      .footer{display:flex;align-items:center;justify-content:space-between;padding:10px 2px;color:var(--muted);font-size:12px}
+      .mini{display:inline-flex;align-items:center;gap:8px}
+      .mini input{transform:translateY(1px)}
+      input[type="checkbox"]{width:16px;height:16px}
+
+      .loader{position:absolute;inset:0;background:rgba(255,255,255,.85);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;z-index:20}
+      .spinner{width:44px;height:44px;border:3px solid #bfdbfe;border-top-color:#2EACFB;border-radius:50%;animation:spin 1s linear infinite}
+      @keyframes spin{to{transform:rotate(360deg)}}
+      .load-msg{font-size:13px;color:#075985}
+      .hidden{display:none}
+
+      .toast{position:absolute;right:16px;bottom:20px;min-width:220px;max-width:520px;background:#ecfdf5;color:#065f46;border:1px solid #a7f3d0;box-shadow:var(--shadow);padding:10px 14px;border-radius:12px;font-size:14px;opacity:0;transform:translateY(8px);transition:opacity .25s ease,transform .25s ease;z-index:30}
+      .toast.show{opacity:1;transform:translateY(0)}
+      .toast.error{background:#fef2f2;color:#7f1d1d;border-color:#fecaca}
+
+      /* Modal (decision) */
+      .modal{position:absolute;inset:0;background:rgba(15,23,42,.35);display:none;align-items:center;justify-content:center;z-index:40}
+      .modal.show{display:flex}
+      .modal-card{width:520px;max-width:92%;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.12);padding:18px}
+      .modal-card h3{margin:0 0 6px;font-size:18px}
+      .modal-card p{margin:6px 0 12px;color:#475569;font-size:14px}
+      .modal-actions{display:flex;gap:8px;justify-content:flex-end}
+      .modal input[type="text"]{width:100%;height:40px;border:1px solid #dbeafe;border-radius:10px;padding:0 10px}
+    </style>
+  </head>
+  <body>
+    <section class="wrap" role="application" aria-label="Orders Module">
+      <div id="loader" class="loader hidden">
+        <div class="spinner"></div>
+        <div id="loadMsg" class="load-msg">Loading...</div>
+      </div>
+
+      <div id="toast" class="toast"></div>
+
+      <!-- Decision Modal -->
+      <div id="decisionModal" class="modal" role="dialog" aria-modal="true">
+        <div class="modal-card">
+          <h3>Sheet already exists</h3>
+          <p id="decisionText"></p>
+          <div style="margin:10px 0">
+            <div class="label">New sheet name</div>
+            <input id="newSheetName" type="text" />
+          </div>
+          <div class="modal-actions">
+            <button id="overwriteBtn" class="btn">Overwrite</button>
+            <button id="renameBtn" class="btn" style="background:#fff;color:#075985;border:1px solid var(--border);font-weight:600">Use new name</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Export blocked modal -->
+      <div id="blockedModal" class="modal" role="dialog" aria-modal="true">
+        <div class="modal-card" style="width:640px;max-width:92%">
+          <h3>Export blocked</h3>
+          <p>Some orders were already exported and cannot be exported again.</p>
+          <div id="blockedList" style="max-height:320px;overflow:auto;border:1px solid var(--border);border-radius:12px;padding:10px;background:#fff"></div>
+          <div class="modal-actions">
+            <button id="blockedCloseBtn" class="btn" style="background:#fff;color:#075985;border:1px solid var(--border);font-weight:600">Close</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <div class="field">
+          <div class="label">Google Sheet name</div>
+          <input id="sheetName" type="text" placeholder="Enter sheet name" />
+        </div>
+        <input id="sheetDateText" type="text" placeholder="-MM/DD/YY" style="width:140px" />
+
+        <button id="sendBtn" class="btn" disabled>SEND TO SHEET</button>
+      </div>
+
+      <div class="table-wrap">
+        <div class="toolbar">
+          <div class="toolbar-left">
+            <span id="countLabel">0 selected</span>
+            <span>•</span>
+            <span id="totalLabel">0 orders</span>
+          </div>
+          <div class="toolbar-right">
+            <input id="search" class="search" type="search" placeholder="Search orders" />
+            <button id="selectAll" class="btn" style="background:#ffffff;color:#075985;border:1px solid var(--border);font-weight:600">Select all</button>
+            <button id="clearSel" class="btn" style="background:#ffffff;color:#075985;border:1px solid var(--border);font-weight:600">Clear</button>
+          </div>
+        </div>
+        <div class="scroller" style="height: 100%">
+          <table id="ordersTable" aria-label="Orders list">
+            <thead>
+              <tr>
+                <th><input id="masterCheck" type="checkbox" aria-label="Select all" /></th>
+                <th>Order #</th>
+                <th>Customer</th>
+                <th>Email</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th>Date</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="footer">
+        <div>Use the checkbox column to select orders to export</div>
+        <label class="mini" style="user-select:none">
+          <input id="autoScroll" type="checkbox" />
+          <span>Auto scroll</span>
+        </label>
+      </div>
+    </section>
+
+    <script>
+      // --- Elements
+      const tbody = document.getElementById('tbody')
+      const countLabel = document.getElementById('countLabel')
+      const totalLabel = document.getElementById('totalLabel')
+      const masterCheck = document.getElementById('masterCheck')
+      const selectAllBtn = document.getElementById('selectAll')
+      const clearSelBtn = document.getElementById('clearSel')
+      const sendBtn = document.getElementById('sendBtn')
+      const sheetInput = document.getElementById('sheetName')
+      const searchInput = document.getElementById('search')
+      const autoScroll = document.getElementById('autoScroll')
+      const loader = document.getElementById('loader')
+      const loadMsg = document.getElementById('loadMsg')
+      const toast = document.getElementById('toast')
+
+      // Decision modal els
+      const decisionModal = document.getElementById('decisionModal')
+      const decisionText = document.getElementById('decisionText')
+      const newSheetName = document.getElementById('newSheetName')
+      const overwriteBtn = document.getElementById('overwriteBtn')
+      const renameBtn = document.getElementById('renameBtn')
+document.getElementById('sheetDateText').value = '-' + new Date().toLocaleDateString('en-US',{month:'2-digit',day:'2-digit',year:'2-digit'})
+
+      // Blocked modal els
+      const blockedModal = document.getElementById('blockedModal')
+      const blockedList = document.getElementById('blockedList')
+      const blockedCloseBtn = document.getElementById('blockedCloseBtn')
+
+
+
+
+
+      // --- State
+      let orders = []
+      let filtered = []
+      const selected = new Set()
+
+      // --- Utils
+      const fmtMoney = n => {
+        if (n == null || n === '') return ''
+        try { return new Intl.NumberFormat(undefined, { style: 'currency', currency: 'USD' }).format(Number(n)) }
+        catch { return String(n) }
+      }
+      const statusClass = s => {
+        const v = String(s || '').toLowerCase()
+        if (v.includes('paid') || v.includes('complete')) return 'paid'
+        if (v.includes('pending') || v.includes('process')) return 'pending'
+        if (v.includes('cancel') || v.includes('refund')) return 'canceled'
+        return ''
+      }
+      const renderEmptyRow = () => {
+        const tr = document.createElement('tr')
+        const td = document.createElement('td')
+        td.colSpan = 7; td.style.textAlign='center'; td.style.padding='22px'; td.style.color='#7a8ba8'
+        td.textContent = 'No orders yet'
+        tr.appendChild(td)
+        return tr
+      }
+
+      function renderRows(list){
+        tbody.innerHTML = ''
+        if (!list.length){ tbody.appendChild(renderEmptyRow()); return }
+        list.forEach(o => {
+          const tr = document.createElement('tr'); tr.dataset.id = o.id
+          const td0 = document.createElement('td')
+          const cb = document.createElement('input'); cb.type='checkbox'; cb.checked = selected.has(o.id)
+          cb.addEventListener('change', () => { cb.checked ? selected.add(o.id) : selected.delete(o.id); updateCounts() })
+          td0.appendChild(cb)
+
+          const td1 = document.createElement('td'); td1.textContent = o.orderNumber || o.id || ''
+          const td2 = document.createElement('td'); td2.textContent = o.customerName || ''
+          const td3 = document.createElement('td'); td3.textContent = o.email || ''
+          const td4 = document.createElement('td'); td4.textContent = fmtMoney(o.total)
+          const td5 = document.createElement('td'); const s = document.createElement('span'); s.className='status '+statusClass(o.status); s.textContent=o.status||''; td5.appendChild(s)
+          const td6 = document.createElement('td'); td6.textContent = o.date || ''
+
+          tr.append(td0, td1, td2, td3, td4, td5, td6)
+          tbody.appendChild(tr)
+        })
+      }
+
+      function updateCounts(){
+        countLabel.textContent = selected.size + ' selected'
+        totalLabel.textContent = filtered.length + ' orders'
+        const hasSheet = !!sheetInput.value.trim()
+        sendBtn.disabled = !hasSheet
+        sendBtn.classList.toggle('ready', hasSheet)
+        const allChecked = filtered.length > 0 && filtered.every(o => selected.has(o.id))
+        masterCheck.checked = allChecked
+        masterCheck.indeterminate = selected.size > 0 && !allChecked
+      }
+
+      function applyFilter(){
+        const q = searchInput.value.trim().toLowerCase()
+        if (!q) filtered = orders.slice()
+        else {
+          filtered = orders.filter(o => {
+            const b = [o.orderNumber, o.id, o.customerName, o.email, o.status, o.date, String(o.total)].join(' ').toLowerCase()
+            return b.includes(q)
+          })
+        }
+        renderRows(filtered); updateCounts()
+      }
+
+      masterCheck.addEventListener('change', () => {
+        masterCheck.checked ? filtered.forEach(o => selected.add(o.id)) : filtered.forEach(o => selected.delete(o.id))
+        renderRows(filtered); updateCounts()
+      })
+      selectAllBtn.addEventListener('click', () => { filtered.forEach(o => selected.add(o.id)); renderRows(filtered); updateCounts() })
+      clearSelBtn.addEventListener('click', () => { selected.clear(); renderRows(filtered); updateCounts() })
+      sheetInput.addEventListener('input', updateCounts)
+      searchInput.addEventListener('input', applyFilter)
+
+      // Send to parent
+      sendBtn.addEventListener('click', e => {
+        e.preventDefault()
+        const sheetName = (sheetInput.value + ' ' + document.getElementById('sheetDateText').value).trim()
+        if (!sheetName) return
+        const ids = Array.from(selected)
+        window.parent.postMessage({ type: 'sendToSheet', sheetName, ids }, '*')
+      })
+
+      function upsertOrders(incoming){
+        const keyOf = x => String(x.id || x.orderNumber || '')
+        const map = new Map(orders.map(o => [keyOf(o), o]))
+        incoming.forEach(x => {
+          const k = keyOf(x)
+          map.set(k, { ...map.get(k), ...x })
+        })
+        orders = Array.from(map.values())
+        orders.sort((a,b) => (Date.parse(b.date||'')||0) - (Date.parse(a.date||'')||0))
+        selected.clear(); orders.forEach(o => selected.add(o.id)) // default: select all
+        applyFilter()
+        if (autoScroll && autoScroll.checked) {
+          const sc = document.querySelector('.scroller'); sc.scrollTop = sc.scrollHeight
+        }
+      }
+
+      function setLoading(active, message){
+        if (typeof message === 'string' && message) loadMsg.textContent = message
+        loader.classList.toggle('hidden', !active)
+      }
+      function showToast(text, isError){
+        toast.textContent = text || ''
+        toast.classList.toggle('error', !!isError)
+        toast.classList.add('show')
+        setTimeout(() => toast.classList.remove('show'), 3000)
+      }
+
+      // Messages from parent
+      window.addEventListener('message', evt => {
+        const d = evt.data || {}
+        if (d.type === 'ordersData') { upsertOrders(Array.isArray(d.orders) ? d.orders : []) }
+        if (d.type === 'clearSelection') { selected.clear(); renderRows(filtered); updateCounts() }
+        if (d.type === 'prefillSheetName' && d.value) { sheetInput.value = String(d.value); updateCounts() }
+        if (d.type === 'loading') { setLoading(!!d.active, d.message) }
+        if (d.type === 'notify') { showToast(String(d.message || ''), d.level === 'error') }
+        if (d.type === 'exportBlocked') { openBlocked(Array.isArray(d.blocked) ? d.blocked : []) }
+      })
+
+      // Decision modal wires
+      overwriteBtn.addEventListener('click', () => { window.parent.postMessage({ type: 'sheetDecision', decision: { mode: 'overwrite' } }, '*') })
+      renameBtn.addEventListener('click', () => {
+        const val = newSheetName.value.trim(); if (!val) return
+        window.parent.postMessage({ type: 'sheetDecision', decision: { mode: 'rename', newTitle: val } }, '*')
+      })
+      function openDecision(existing, suggestion){
+        decisionText.textContent = `A sheet named "${existing}" already exists. Choose to overwrite it or create a new sheet with a different name.`
+        newSheetName.value = suggestion || `${existing} (2)`; decisionModal.classList.add('show')
+      }
+      function closeDecision(){ decisionModal.classList.remove('show') }
+      window.addEventListener('message', evt => {
+        const d = evt.data || {}
+        if (d.type === 'sheetDecisionNeeded') openDecision(d.existingTitle, d.suggestion)
+        if (d.type === 'closeDecisionModal') closeDecision()
+      })
+
+      function openBlocked(blocked){
+        blockedList.innerHTML = ''
+        if (!blocked.length){
+          blockedList.textContent = 'No details.'
+        } else {
+          const ul = document.createElement('ul')
+          ul.style.margin = '0'
+          ul.style.paddingLeft = '18px'
+          blocked.forEach(b => {
+            const li = document.createElement('li')
+            const orderRef = b.orderNumber ? `#${b.orderNumber}` : (b.orderId || '')
+            const when = b.sentToSheetDate ? ` • ${b.sentToSheetDate}` : ''
+            const where = b.sheetName ? ` • ${b.sheetName}` : ''
+            li.textContent = `${orderRef}${where}${when}`
+            ul.appendChild(li)
+          })
+          blockedList.appendChild(ul)
+        }
+        blockedModal.classList.add('show')
+        showToast('Export blocked: already exported orders detected', true)
+      }
+      function closeBlocked(){ blockedModal.classList.remove('show') }
+      blockedCloseBtn.addEventListener('click', closeBlocked)
+
+      function announceReady(){ window.parent.postMessage({ type: 'moduleReady', version: '1.4.0' }, '*') }
+      document.addEventListener('DOMContentLoaded', () => { announceReady(); applyFilter() })
+    </script>
+  </body>
+</html>
