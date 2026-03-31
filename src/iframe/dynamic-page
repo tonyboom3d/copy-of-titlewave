@@ -132,6 +132,37 @@
 
     <!-- Main Container -->
     <main class="max-w-5xl mx-auto px-4 py-8 md:py-12 space-y-10">
+        <section id="postSaveSummary" class="hidden min-h-[70vh] flex-col items-center justify-center">
+            <div class="w-full max-w-2xl bg-white border border-slate-200 rounded-3xl shadow-xl p-8 md:p-10 text-center">
+                <div class="w-16 h-16 mx-auto mb-5 rounded-full bg-green-100 text-green-600 flex items-center justify-center">
+                    <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+                </div>
+                <p id="postSaveEyebrow" class="text-sm font-semibold tracking-[0.18em] text-accent-500 uppercase mb-3">Change Request Received</p>
+                <h2 id="postSaveTitle" class="text-3xl md:text-4xl font-extrabold text-slate-900 tracking-tight mb-4">Thank you, we have received your update request.</h2>
+                <p id="postSaveMessage" class="text-base md:text-lg leading-relaxed text-slate-600 max-w-xl mx-auto mb-6">
+                    Our team is now reviewing the changes you submitted. We will update you as soon as possible. You can return to this link at any time to track your order status.
+                </p>
+                <div class="inline-flex flex-col items-center gap-2 bg-amber-50 border border-amber-200 rounded-2xl px-5 py-4">
+                    <span class="text-xs font-semibold uppercase tracking-[0.18em] text-amber-700">Current Status</span>
+                    <span id="postSaveStatusText" class="text-lg font-bold text-amber-800">Waiting for Approval</span>
+                </div>
+            </div>
+        </section>
+
+        <div id="orderExperience" class="space-y-10">
+        <section id="statusBannerSection" class="hidden">
+            <div id="statusBanner" class="rounded-2xl border px-5 py-4 shadow-sm">
+                <div class="flex items-start gap-3">
+                    <div id="statusBannerIconWrap" class="mt-0.5 w-9 h-9 rounded-full flex items-center justify-center shrink-0">
+                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path id="statusBannerIconPath" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    </div>
+                    <div class="flex-1">
+                        <p id="statusBannerTitle" class="font-bold text-base">Order status update</p>
+                        <p id="statusBannerMessage" class="text-sm leading-relaxed mt-1"></p>
+                    </div>
+                </div>
+            </div>
+        </section>
 
         <!-- Timer Section -->
         <section class="flex flex-col items-center">
@@ -368,6 +399,19 @@
                             <label class="text-sm text-slate-600 font-medium">Name and Number</label>
                             <input type="text" id="modalNameNumber" class="w-full border border-slate-300 rounded-md px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 shadow-sm" value="Test 28">
                         </div>
+
+                        <div id="modalChangesPanel" class="hidden rounded-xl border border-amber-200 bg-amber-50/80 p-4">
+                            <div class="flex items-center gap-2 mb-3">
+                                <span class="inline-flex items-center justify-center w-7 h-7 rounded-full bg-amber-100 text-amber-700">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
+                                </span>
+                                <div>
+                                    <p class="text-sm font-bold text-amber-900">Change summary</p>
+                                    <p class="text-xs text-amber-700">Review what was changed from the original order.</p>
+                                </div>
+                            </div>
+                            <div id="modalChangesList" class="space-y-2.5"></div>
+                        </div>
                     </div>
                 </div>
                 
@@ -377,6 +421,8 @@
                     <button id="saveModalBtn" class="px-5 py-2 bg-brand-600 text-white font-medium hover:bg-brand-700 rounded-lg transition-colors shadow-sm">Save</button>
                 </div>
             </div>
+        </div>
+
         </div>
 
         <!-- Status & Loading Modal -->
@@ -445,6 +491,7 @@
         let lockedByTimer = false
         let bypassTimeWindow = false
         let authMode = 'customer'
+        let postSaveSummaryVisible = false
         let draftByRowKey = new Map() // rowKey -> partial fields
         let baseItemsByRowKey = new Map()
 
@@ -474,9 +521,64 @@
             return { ...(item || {}), ...patch }
         }
 
+        function normalizeStatus(status) {
+            if (Array.isArray(status)) {
+                const first = status.find(Boolean)
+                return first ? String(first).trim() : ''
+            }
+            return String(status || '').trim()
+        }
+
+        function getStatusMeta(status) {
+            const normalized = normalizeStatus(status)
+            const lower = normalized.toLowerCase()
+
+            if (lower === 'waiting for approval') {
+                return {
+                    tone: 'amber',
+                    title: 'Change request in review',
+                    message: 'We are still reviewing your change request, so additional edits are temporarily unavailable.',
+                    iconPath: 'M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z'
+                }
+            }
+
+            if (lower === 'approved') {
+                return {
+                    tone: 'green',
+                    title: 'Change request approved',
+                    message: 'Your change request has been approved. No further edits can be made to this order.',
+                    iconPath: 'M5 13l4 4L19 7'
+                }
+            }
+
+            if (lower === 'canceled' || lower === 'cancelled') {
+                return {
+                    tone: 'red',
+                    title: 'Order canceled',
+                    message: 'This order has been canceled, so its details can no longer be edited.',
+                    iconPath: 'M6 18L18 6M6 6l12 12'
+                }
+            }
+
+            if (lower === 'sent to production') {
+                return {
+                    tone: 'blue',
+                    title: 'Order sent to production',
+                    message: 'This order has already been sent to production and can no longer be edited.',
+                    iconPath: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z'
+                }
+            }
+
+            return null
+        }
+
         function areDraftPatchesEqual(a, b) {
             const keys = ['size', 'color', 'colorLabel', 'colorHex', 'image', 'nameNumber']
             return keys.every(key => String(a?.[key] ?? '') === String(b?.[key] ?? ''))
+        }
+
+        function hasPersistedChanges(item) {
+            return !!item?.persistedChanged
         }
 
         function isItemDirty(item) {
@@ -497,6 +599,10 @@
         function hasActualChanges() {
             if (!uiState || !Array.isArray(uiState.items)) return false
             return uiState.items.some(isItemDirty)
+        }
+
+        function isItemChanged(item) {
+            return hasPersistedChanges(item) || isItemDirty(item)
         }
 
         function refreshSaveButtonState() {
@@ -521,6 +627,62 @@
         function syncEditingLockState() {
             lockedEditing = lockedByHost || lockedByTimer
             refreshSaveButtonState()
+        }
+
+        function showOrderExperience() {
+            const orderExperience = document.getElementById('orderExperience')
+            const postSaveSummary = document.getElementById('postSaveSummary')
+            if (orderExperience) orderExperience.classList.remove('hidden')
+            if (postSaveSummary) {
+                postSaveSummary.classList.add('hidden')
+                postSaveSummary.classList.remove('flex')
+            }
+            postSaveSummaryVisible = false
+        }
+
+        function showPostSaveSummary(statusText) {
+            const orderExperience = document.getElementById('orderExperience')
+            const postSaveSummary = document.getElementById('postSaveSummary')
+            const statusEl = document.getElementById('postSaveStatusText')
+            if (orderExperience) orderExperience.classList.add('hidden')
+            if (postSaveSummary) {
+                postSaveSummary.classList.remove('hidden')
+                postSaveSummary.classList.add('flex')
+            }
+            if (statusEl) statusEl.textContent = normalizeStatus(statusText) || 'Waiting for Approval'
+            postSaveSummaryVisible = true
+        }
+
+        function updateStatusBanner(status) {
+            const meta = getStatusMeta(status)
+            const section = document.getElementById('statusBannerSection')
+            const banner = document.getElementById('statusBanner')
+            const iconWrap = document.getElementById('statusBannerIconWrap')
+            const iconPath = document.getElementById('statusBannerIconPath')
+            const titleEl = document.getElementById('statusBannerTitle')
+            const messageEl = document.getElementById('statusBannerMessage')
+
+            if (!section || !banner || !iconWrap || !iconPath || !titleEl || !messageEl) return
+
+            if (!meta) {
+                section.classList.add('hidden')
+                return
+            }
+
+            const toneClasses = {
+                amber: ['bg-amber-50', 'border-amber-200', 'text-amber-900', 'bg-amber-100', 'text-amber-700'],
+                green: ['bg-green-50', 'border-green-200', 'text-green-900', 'bg-green-100', 'text-green-700'],
+                red: ['bg-red-50', 'border-red-200', 'text-red-900', 'bg-red-100', 'text-red-700'],
+                blue: ['bg-blue-50', 'border-blue-200', 'text-blue-900', 'bg-blue-100', 'text-blue-700']
+            }
+            const [bannerBg, bannerBorder, bannerText, iconBg, iconText] = toneClasses[meta.tone] || toneClasses.amber
+
+            banner.className = `rounded-2xl border px-5 py-4 shadow-sm ${bannerBg} ${bannerBorder} ${bannerText}`
+            iconWrap.className = `mt-0.5 w-9 h-9 rounded-full flex items-center justify-center shrink-0 ${iconBg} ${iconText}`
+            iconPath.setAttribute('d', meta.iconPath)
+            titleEl.textContent = meta.title
+            messageEl.textContent = meta.message
+            section.classList.remove('hidden')
         }
 
         // --- Live Timer Logic ---
@@ -613,9 +775,10 @@
             const contact = state?.contact || {}
             const shipping = state?.shipping || {}
             const permissions = state?.permissions || {}
+            const normalizedStatus = normalizeStatus(order?.status) || 'Pending'
             log('setOrderMetaFromState', {
                 orderNumber: order?.number,
-                status: order?.status,
+                status: normalizedStatus,
                 itemCount: Array.isArray(state?.items) ? state.items.length : 0,
                 isAdminMode: !!permissions?.isAdminMode,
                 editingAllowed: permissions?.editingAllowed
@@ -625,7 +788,7 @@
             if (orderNumEl) orderNumEl.textContent = order?.number ? `#${order.number}` : '#—'
 
             const statusEl = document.getElementById('orderStatusText')
-            if (statusEl) statusEl.textContent = order?.status ? String(order.status) : '—'
+            if (statusEl) statusEl.textContent = normalizedStatus || '—'
 
             const nameEl = document.getElementById('contactName')
             if (nameEl) nameEl.textContent = contact?.name ? String(contact.name) : '—'
@@ -642,6 +805,7 @@
             const createdDate = order?.createdDate || ''
             hostInit.isAdminMode = !!permissions?.isAdminMode
             startTimer(createdDate, !!permissions?.bypassTimeWindow)
+            updateStatusBanner(normalizedStatus)
 
             lockedByHost = permissions.editingAllowed === false
             syncEditingLockState()
@@ -666,7 +830,7 @@
                 const color = mergedItem.colorLabel || mergedItem.color || ''
                 const colorHex = mergedItem.colorHex || ''
                 const nameNumber = mergedItem.nameNumber || ''
-                const dirty = isItemDirty(it)
+                const dirty = isItemChanged(mergedItem)
 
                 row.innerHTML = `
                     <td class="py-3 px-6">
@@ -688,7 +852,6 @@
 
                 row.addEventListener('click', () => {
                     log('row click', { rowKey: it.rowKey, lockedEditing, isAdminMode: hostInit.isAdminMode })
-                    if (lockedEditing) return
                     openEditModal(it)
                 })
 
@@ -722,6 +885,8 @@
         const modalColorSwatch = document.getElementById('modalColorSwatch');
         const modalNameNumber = document.getElementById('modalNameNumber');
         const modalNameNumberGroup = modalNameNumber.parentElement;
+        const modalChangesPanel = document.getElementById('modalChangesPanel');
+        const modalChangesList = document.getElementById('modalChangesList');
         
         let currentRow = null;
         let originalSize = '';
@@ -731,6 +896,91 @@
         let originalNameNum = '';
 
         const fallbackSizeOptions = ['Youth-XS', 'Youth-Small', 'Youth-Medium', 'Youth-Large', 'GC Y L/XL', 'Adult-S', 'Adult-M', 'Adult-L', 'Adult-XL'];
+
+        function makeDiffRow(label, fromValue, toValue, { fromSwatch = '', toSwatch = '' } = {}) {
+            const row = document.createElement('div')
+            row.className = 'grid grid-cols-[96px_1fr_auto_1fr] items-center gap-2 rounded-lg bg-white/80 border border-amber-100 px-3 py-2'
+
+            const fromChip = `
+                <div class="min-w-0 inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 text-sm text-slate-700">
+                    ${fromSwatch ? `<span class="inline-block w-3.5 h-3.5 rounded-full border border-slate-300 shrink-0" style="background:${escapeHtml(fromSwatch)}"></span>` : ''}
+                    <span class="truncate">${escapeHtml(fromValue || 'Empty')}</span>
+                </div>
+            `
+            const toChip = `
+                <div class="min-w-0 inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-100/70 px-2.5 py-2 text-sm font-medium text-amber-900">
+                    ${toSwatch ? `<span class="inline-block w-3.5 h-3.5 rounded-full border border-amber-300 shrink-0" style="background:${escapeHtml(toSwatch)}"></span>` : ''}
+                    <span class="truncate">${escapeHtml(toValue || 'Empty')}</span>
+                </div>
+            `
+
+            row.innerHTML = `
+                <span class="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">${escapeHtml(label)}</span>
+                ${fromChip}
+                <span class="text-amber-500 flex items-center justify-center">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path></svg>
+                </span>
+                ${toChip}
+            `
+            return row
+        }
+
+        function renderModalChanges(item, mergedItem) {
+            if (!modalChangesPanel || !modalChangesList) return
+
+            const originalSizeValue = item?.originalSize || ''
+            const originalColorValue = item?.originalColorLabel || item?.originalColor || ''
+            const originalColorSwatch = item?.originalColorHex || ''
+            const originalNameNumberValue = item?.originalNameNumber || ''
+
+            const currentSizeValue = mergedItem?.size || ''
+            const currentColorValue = mergedItem?.colorLabel || mergedItem?.color || ''
+            const currentColorSwatch = mergedItem?.colorHex || ''
+            const currentNameNumberValue = mergedItem?.nameNumber || ''
+
+            const entries = []
+
+            if (String(originalSizeValue) !== String(currentSizeValue)) {
+                entries.push(makeDiffRow('Size', originalSizeValue, currentSizeValue))
+            }
+
+            if (
+                String(originalColorValue) !== String(currentColorValue) ||
+                String(originalColorSwatch) !== String(currentColorSwatch)
+            ) {
+                entries.push(makeDiffRow('Color', originalColorValue, currentColorValue, {
+                    fromSwatch: originalColorSwatch,
+                    toSwatch: currentColorSwatch
+                }))
+            }
+
+            if (String(originalNameNumberValue) !== String(currentNameNumberValue)) {
+                entries.push(makeDiffRow('Name / Number', originalNameNumberValue, currentNameNumberValue))
+            }
+
+            modalChangesList.innerHTML = ''
+            if (!entries.length) {
+                modalChangesPanel.classList.add('hidden')
+                return
+            }
+
+            entries.forEach(entry => modalChangesList.appendChild(entry))
+            modalChangesPanel.classList.remove('hidden')
+        }
+
+        function applyModalReadOnlyState(readOnly) {
+            modalSize.disabled = readOnly
+            modalColor.disabled = readOnly
+            modalNameNumber.disabled = readOnly
+            resetModalBtn.classList.toggle('hidden', readOnly)
+            saveModalBtn.textContent = readOnly ? 'Close' : 'Save'
+            saveModalBtn.classList.toggle('bg-brand-600', !readOnly)
+            saveModalBtn.classList.toggle('hover:bg-brand-700', !readOnly)
+            saveModalBtn.classList.toggle('text-white', !readOnly)
+            saveModalBtn.classList.toggle('bg-slate-900', readOnly)
+            saveModalBtn.classList.toggle('hover:bg-slate-800', readOnly)
+            saveModalBtn.classList.toggle('text-white', readOnly)
+        }
 
         function ensureOption(options, value, label = value) {
             const normalizedValue = String(value || '')
@@ -802,11 +1052,11 @@
             log('openEditModal', { rowKey: item?.rowKey, productName: item?.productName })
             const mergedItem = buildMergedItem(item)
             currentRow = item
-            originalSize = item.size || ''
-            originalColor = item.color || ''
-            originalColorHex = item.colorHex || ''
-            originalImage = item.image || ''
-            originalNameNum = item.nameNumber || ''
+            originalSize = mergedItem.size || ''
+            originalColor = mergedItem.color || ''
+            originalColorHex = mergedItem.colorHex || ''
+            originalImage = mergedItem.image || ''
+            originalNameNum = mergedItem.nameNumber || ''
 
             modalTitle.textContent = mergedItem.productName || ''
             modalImg.src = mergedItem.image || ''
@@ -815,6 +1065,8 @@
             populateSizeDropdown(mergedItem)
             populateColorDropdown(mergedItem)
             modalNameNumber.value = mergedItem.nameNumber || ''
+            renderModalChanges(item, mergedItem)
+            applyModalReadOnlyState(lockedEditing)
 
             if ((item.nameNumber || '').toString().trim()) {
                 modalNameNumberGroup.classList.remove('hidden')
@@ -1150,7 +1402,10 @@
                 baseItemsByRowKey = new Map((uiState?.items || []).map(item => [item.rowKey, { ...item }]))
                 if (uiState) {
                     setOrderMetaFromState(uiState)
-                    renderItemsTable(uiState)
+                    if (!postSaveSummaryVisible) {
+                        showOrderExperience()
+                        renderItemsTable(uiState)
+                    }
                 }
                 refreshSaveButtonState()
 
@@ -1189,9 +1444,9 @@
             if (d.type === HOST_TYPES.SAVE_RESULT) {
                 log('received TW_SAVE_RESULT', { ok: !!d.ok, message: d.message || '', newStatus: d.newStatus || '' })
                 if (d.ok) {
-                    loadingState.classList.add('hidden')
-                    successState.classList.remove('hidden')
+                    hideStatusModal()
                     draftByRowKey = new Map()
+                    showPostSaveSummary(d.newStatus || 'Waiting for Approval')
                     refreshSaveButtonState()
                 } else {
                     // show failure as authError-style banner inside status modal (simple reuse)
