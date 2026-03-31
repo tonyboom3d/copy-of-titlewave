@@ -508,11 +508,11 @@
 
                 <!-- Success State -->
                 <div id="successState" class="hidden flex flex-col items-center justify-center py-4">
-                    <div class="w-14 h-14 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-4">
-                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+                    <div id="statusResultIconWrap" class="w-14 h-14 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-4">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path id="statusResultIconPath" stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
                     </div>
-                    <h3 class="text-xl font-bold text-slate-800 mb-2">Thank You!</h3>
-                    <p class="text-slate-600 text-sm leading-relaxed mb-6">
+                    <h3 id="statusResultTitle" class="text-xl font-bold text-slate-800 mb-2">Thank You!</h3>
+                    <p id="statusResultMessage" class="text-slate-600 text-sm leading-relaxed mb-6">
                         The information was saved successfully and transferred to customer service for further processing.
                     </p>
                     <button id="closeStatusModalBtn" class="w-full py-2.5 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 transition-colors">Close</button>
@@ -722,9 +722,11 @@
             return normalized
         }
 
-        function getItemBadgeLabel(item) {
+        function getItemBadgeLabel(item, orderStatus = '') {
             const statusLabel = formatStatusForDisplay(item?.status || '')
             if (statusLabel && statusLabel !== 'Open for edits') return statusLabel
+            const orderStatusLabel = formatStatusForDisplay(orderStatus || '')
+            if (hasPersistedChanges(item) && orderStatusLabel && orderStatusLabel !== 'Open for edits') return orderStatusLabel
             return isItemChanged(item) ? 'Changed' : ''
         }
 
@@ -830,6 +832,7 @@
             if (!messagesSection || !messagesThread) return
             const msgs = Array.isArray(state?.order?.messages) ? state.order.messages : []
             const allowed = state?.permissions?.messagingAllowed !== false
+            const lockedHint = String(state?.permissions?.messagingHint || 'Messaging is locked for this order status.')
 
             messagesSection.classList.remove('hidden')
             messagesThread.innerHTML = ''
@@ -867,7 +870,10 @@
 
             if (messageInput) messageInput.disabled = !allowed
             if (messageSendBtn) messageSendBtn.disabled = !allowed
-            if (messagesLockedHint) messagesLockedHint.classList.toggle('hidden', !!allowed)
+            if (messagesLockedHint) {
+                messagesLockedHint.textContent = lockedHint
+                messagesLockedHint.classList.toggle('hidden', !!allowed)
+            }
         }
 
         messageSendBtn?.addEventListener('click', () => {
@@ -1088,7 +1094,7 @@
                 const colorHex = mergedItem.colorHex || ''
                 const nameNumber = mergedItem.nameNumber || ''
                 const playerLastName = mergedItem.playerLastName || ''
-                const changeTag = getItemBadgeLabel(mergedItem)
+                const changeTag = getItemBadgeLabel(mergedItem, state?.order?.status || '')
 
                 row.innerHTML = `
                     <td class="py-3 px-6">
@@ -1559,6 +1565,10 @@
         const statusModalContent = document.getElementById('statusModalContent');
         const loadingState = document.getElementById('loadingState');
         const successState = document.getElementById('successState');
+        const statusResultIconWrap = document.getElementById('statusResultIconWrap');
+        const statusResultIconPath = document.getElementById('statusResultIconPath');
+        const statusResultTitle = document.getElementById('statusResultTitle');
+        const statusResultMessage = document.getElementById('statusResultMessage');
         const closeStatusModalBtn = document.getElementById('closeStatusModalBtn');
         const confirmModal = document.getElementById('confirmModal')
         const confirmModalContent = document.getElementById('confirmModalContent')
@@ -1569,7 +1579,7 @@
         let pendingSavePayload = null
         let adminDecisionByRowKey = new Map() // rowKey -> status
 
-        const ADMIN_STATUSES = ['Pending (24h)', 'Approved', 'Waiting for Approval', 'Rejected', 'Canceled', 'Sent to Production']
+        const ADMIN_STATUSES = ['Approved', 'Waiting for Approval', 'Rejected', 'Canceled']
         const adminRequestsSection = document.getElementById('adminRequestsSection')
         const adminRequestsList = document.getElementById('adminRequestsList')
         const adminRequestsEmpty = document.getElementById('adminRequestsEmpty')
@@ -1584,6 +1594,22 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;')
+        }
+
+        function setStatusResultState({ ok, message = '' }) {
+            if (!statusResultIconWrap || !statusResultIconPath || !statusResultTitle || !statusResultMessage) return
+            if (ok) {
+                statusResultIconWrap.className = 'w-14 h-14 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-4'
+                statusResultIconPath.setAttribute('d', 'M5 13l4 4L19 7')
+                statusResultTitle.textContent = 'Thank You!'
+                statusResultMessage.textContent = message || 'The information was saved successfully and transferred to customer service for further processing.'
+                return
+            }
+
+            statusResultIconWrap.className = 'w-14 h-14 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4'
+            statusResultIconPath.setAttribute('d', 'M6 18L18 6M6 6l12 12')
+            statusResultTitle.textContent = 'Could not save changes'
+            statusResultMessage.textContent = message || 'We could not save your changes. Please try again.'
         }
 
         function showConfirmModal(changes, itemsByRowKey) {
@@ -2093,11 +2119,9 @@
                     showPostSaveSummary(d.newStatus || 'Waiting for Approval')
                     refreshSaveButtonState()
                 } else {
-                    // show failure as authError-style banner inside status modal (simple reuse)
+                    setStatusResultState({ ok: false, message: d.message ? String(d.message) : 'Failed to save changes.' })
                     loadingState.classList.add('hidden')
                     successState.classList.remove('hidden')
-                    const p = successState.querySelector('p')
-                    if (p) p.textContent = d.message ? String(d.message) : 'Failed to save changes.'
                 }
                 return
             }
@@ -2112,6 +2136,10 @@
             if (d.type === 'TW_MESSAGE_RESULT') {
                 if (!d.ok) {
                     log('message send failed', { message: d.message || '' })
+                    if (messagesLockedHint) {
+                        messagesLockedHint.textContent = String(d.message || 'Failed to send message.')
+                        messagesLockedHint.classList.remove('hidden')
+                    }
                 }
                 return
             }
