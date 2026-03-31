@@ -4,6 +4,7 @@ import { Permissions, webMethod } from 'wix-web-module'
 
 const EDIT_WINDOW_MS = 24 * 3600 * 1000
 const WAITING_FOR_APPROVAL_TAGS = ['Waiting for Approval']
+const PENDING_TAGS = ['Pending (24h)', 'Pending', 'Open for edits']
 
 function normalizeStatus(statusValue) {
     if (Array.isArray(statusValue)) {
@@ -58,7 +59,15 @@ export const updateOrderLineItems = webMethod(Permissions.Anyone, async (orderId
         }
 
         const orderStatus = normalizeStatus(existingOrder.orderStatus)
-        if (!orderStatus.toLowerCase().includes('pending')) {
+        const orderStatusLower = orderStatus.toLowerCase()
+
+        // Treat missing/empty status as "open for edits" to avoid blocking legitimate saves
+        const isEditableStatus =
+            !orderStatusLower ||
+            PENDING_TAGS.some(tag => orderStatusLower.includes(String(tag).toLowerCase())) ||
+            orderStatusLower.includes('pending')
+
+        if (!isEditableStatus) {
             return {
                 ok: false,
                 code: 'ORDER_NOT_PENDING',
@@ -90,7 +99,7 @@ export const updateOrderLineItems = webMethod(Permissions.Anyone, async (orderId
             orderStatus: WAITING_FOR_APPROVAL_TAGS
         }
 
-        const updateResult = await wixData.update('ordersStatus', updatedOrder, { suppressAuth: true, suppressHooks: true })
+        const updateResult = await wixData.update('ordersStatus', updatedOrder, { suppressAuth: true, suppressHooks: false })
 
         return {
             ok: true,

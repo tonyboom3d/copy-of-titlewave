@@ -698,6 +698,17 @@
             return isItemChanged(item) ? 'Changed' : ''
         }
 
+        function getItemBadgeClasses(label) {
+            const lower = (label || '').toLowerCase()
+            if (lower === 'changed') return 'bg-amber-500 text-white'
+            if (lower.includes('waiting')) return 'bg-blue-500 text-white'
+            if (lower === 'approved') return 'bg-green-500 text-white'
+            if (lower === 'rejected') return 'bg-red-500 text-white'
+            if (lower === 'canceled' || lower === 'cancelled') return 'bg-rose-800 text-white'
+            if (lower === 'sent to production') return 'bg-blue-700 text-white'
+            return 'bg-slate-500 text-white'
+        }
+
         function getStatusMeta(status) {
             const normalized = normalizeStatus(status)
             const lower = normalized.toLowerCase()
@@ -1054,11 +1065,12 @@
                 const nameNumber = mergedItem.nameNumber || ''
                 const playerLastName = mergedItem.playerLastName || ''
                 const changeTag = getItemBadgeLabel(mergedItem, state?.order?.status || '')
+                const badgeClasses = getItemBadgeClasses(changeTag)
 
                 row.innerHTML = `
                     <td class="py-3 px-6">
                         <div class="relative w-16 h-16 bg-slate-100 rounded mx-auto overflow-hidden border border-slate-200">
-                            ${changeTag ? `<span class="absolute top-1 right-1 z-10 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">${escapeHtml(changeTag)}</span>` : ''}
+                            ${changeTag ? `<span class="absolute top-1 right-1 z-10 ${badgeClasses} text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm whitespace-nowrap max-w-[90px] truncate block">${escapeHtml(changeTag)}</span>` : ''}
                             ${imgUrl ? `<img src="${imgUrl}" alt="" class="w-full h-full object-cover opacity-90" onerror="this.style.display='none'">` : ''}
                         </div>
                     </td>

@@ -524,7 +524,7 @@ async function buildUiItems(lineItems, savedItems = [], snapshotItems = []) {
             ? mergeSavedPatchesIntoRows(fromOrder, savedItems)
             : buildRowsFromSavedItems(savedItems)
 
-    // Fallback: fill empty nameNumber/playerLastName from CMS lineItems snapshot (has name/number from export)
+    // Fallback: enrich rows from CMS lineItems snapshot (has real 4-char itemId, name, number from export)
     if (snapshotItems.length > 0 && rows.length > 0) {
         const snapByProductId = new Map()
         for (const snap of snapshotItems) {
@@ -535,7 +535,6 @@ async function buildUiItems(lineItems, savedItems = [], snapshotItems = []) {
         }
         const usedCountByPid = new Map()
         rows = rows.map(row => {
-            if (String(row.nameNumber || '').trim()) return row
             const pid = String(row.productId || '').trim()
             if (!pid) return row
             const snaps = snapByProductId.get(pid) || []
@@ -543,17 +542,28 @@ async function buildUiItems(lineItems, savedItems = [], snapshotItems = []) {
             const snap = snaps[usedCount]
             if (!snap) return row
             usedCountByPid.set(pid, usedCount + 1)
+
+            const snapItemId = String(snap?.itemId || '').trim()
+            // Prefer the real 4-char itemId from export snapshot over the "0-1" index format
+            const isIndexFormat = /^\d+-\d+$/.test(String(row.itemId || ''))
+            const resolvedItemId = (isIndexFormat && snapItemId) ? snapItemId : (row.itemId || snapItemId)
+
             const nameNum = combineLegacyNameAndNumber(snap?.name, snap?.number)
             const lastName = String(snap?.playerLastName || '').trim()
-            if (!nameNum && !lastName) return row
             return {
                 ...row,
-                nameNumber: nameNum || row.nameNumber,
-                playerLastName: lastName || row.playerLastName,
-                hasNameNumberField: !!nameNum || row.hasNameNumberField,
-                hasPlayerLastNameField: !!lastName || row.hasPlayerLastNameField,
-                originalNameNumber: row.originalNameNumber || nameNum,
-                originalPlayerLastName: row.originalPlayerLastName || lastName
+                itemId: resolvedItemId,
+                rowKey: row.rowKey, // keep rowKey unchanged for UI matching
+                ...(nameNum && !String(row.nameNumber || '').trim() ? {
+                    nameNumber: nameNum,
+                    hasNameNumberField: true,
+                    originalNameNumber: row.originalNameNumber || nameNum
+                } : {}),
+                ...(lastName && !String(row.playerLastName || '').trim() ? {
+                    playerLastName: lastName,
+                    hasPlayerLastNameField: true,
+                    originalPlayerLastName: row.originalPlayerLastName || lastName
+                } : {})
             }
         })
     }
