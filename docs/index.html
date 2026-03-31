@@ -164,6 +164,32 @@
             </div>
         </section>
 
+        <!-- Admin: change requests -->
+        <section id="adminRequestsSection" class="hidden">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="p-6 md:p-7 border-b border-slate-100">
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0">
+                            <p class="text-xs font-semibold uppercase tracking-[0.18em] text-accent-500 mb-2">Admin</p>
+                            <h3 class="text-xl md:text-2xl font-extrabold text-slate-900 tracking-tight">Requested changes</h3>
+                            <p class="text-sm text-slate-500 mt-2">Approve or reject per item, or apply a bulk decision.</p>
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <button id="adminApproveAllBtn" class="px-4 py-2 rounded-xl bg-green-600 text-white font-extrabold hover:bg-green-700 transition-colors">Approve all</button>
+                            <button id="adminRejectAllBtn" class="px-4 py-2 rounded-xl bg-red-600 text-white font-extrabold hover:bg-red-700 transition-colors">Reject all</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="p-6 md:p-7">
+                    <div id="adminRequestsEmpty" class="hidden text-slate-500 text-sm">No pending change requests found.</div>
+                    <div id="adminRequestsList" class="space-y-3"></div>
+                </div>
+                <div class="p-6 md:p-7 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+                    <button id="adminSaveDecisionsBtn" class="px-5 py-2.5 rounded-xl bg-slate-900 text-white font-extrabold hover:bg-slate-800 transition-colors shadow-sm">Save decisions</button>
+                </div>
+            </div>
+        </section>
+
         <!-- Timer Section -->
         <section class="flex flex-col items-center">
             <div class="flex items-center gap-3 mb-6">
@@ -213,6 +239,27 @@
                     <span><span id="timeLeftText">02:45:30</span> left</span>
                 </div>
                 <p id="timerStatusMessage" class="hidden mt-2 text-sm font-semibold text-red-600"></p>
+            </div>
+        </section>
+
+        <!-- Messages (admin <-> client) -->
+        <section id="messagesSection" class="hidden">
+            <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="p-6 md:p-8 border-b border-slate-100">
+                    <h3 class="text-lg md:text-xl font-extrabold text-slate-900 tracking-tight">Messages</h3>
+                    <p class="text-sm text-slate-500 mt-2">Conversation between admin and client for this order.</p>
+                </div>
+                <div class="p-6 md:p-8">
+                    <div id="messagesThread" class="space-y-3 max-h-[260px] overflow-auto custom-scrollbar pr-1"></div>
+                    <div id="messagesLockedHint" class="hidden mt-4 text-sm font-semibold text-slate-500">Messaging is locked for this order status.</div>
+                    <div class="mt-4 flex items-end gap-3">
+                        <div class="flex-1">
+                            <label class="text-xs font-semibold text-slate-500 uppercase tracking-[0.14em]">New message</label>
+                            <textarea id="messageInput" rows="2" class="mt-1 w-full border border-slate-200 rounded-2xl px-4 py-3 text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500 custom-scrollbar" placeholder="Write a message..."></textarea>
+                        </div>
+                        <button id="messageSendBtn" class="px-5 py-3 rounded-2xl bg-slate-900 text-white font-extrabold hover:bg-slate-800 transition-colors">Send</button>
+                    </div>
+                </div>
             </div>
         </section>
 
@@ -453,6 +500,24 @@
             </div>
         </div>
 
+        <!-- Double confirmation modal -->
+        <div id="confirmModal" class="fixed inset-0 bg-slate-900/40 z-[70] hidden flex items-center justify-center backdrop-blur-sm opacity-0 transition-opacity duration-300">
+            <div id="confirmModalContent" class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl overflow-hidden transform scale-95 transition-transform duration-300 mx-4">
+                <div class="p-6 border-b border-slate-100">
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-accent-500 mb-2">Confirm changes</p>
+                    <h3 class="text-xl md:text-2xl font-extrabold text-slate-900 tracking-tight">Please confirm before saving</h3>
+                    <p class="text-sm text-slate-500 mt-2">Review exactly what will change. Nothing is saved until you confirm.</p>
+                </div>
+                <div class="p-6">
+                    <div id="confirmList" class="space-y-3 max-h-[360px] overflow-auto custom-scrollbar pr-1"></div>
+                </div>
+                <div class="p-6 bg-slate-50 border-t border-slate-100 flex items-center justify-end gap-3">
+                    <button id="confirmCancelBtn" class="px-5 py-2.5 rounded-xl border border-slate-200 bg-white text-slate-700 font-semibold hover:bg-slate-50 transition-colors">Cancel</button>
+                    <button id="confirmOkBtn" class="px-5 py-2.5 rounded-xl bg-brand-600 text-white font-extrabold hover:bg-brand-700 transition-colors shadow-sm">Confirm & Save</button>
+                </div>
+            </div>
+        </div>
+
     </main>
 
     <!-- Scripts -->
@@ -494,6 +559,11 @@
         let postSaveSummaryVisible = false
         let draftByRowKey = new Map() // rowKey -> partial fields
         let baseItemsByRowKey = new Map()
+        const messagesSection = document.getElementById('messagesSection')
+        const messagesThread = document.getElementById('messagesThread')
+        const messageInput = document.getElementById('messageInput')
+        const messageSendBtn = document.getElementById('messageSendBtn')
+        const messagesLockedHint = document.getElementById('messagesLockedHint')
 
         function postToHost(payload) {
             try {
@@ -621,6 +691,51 @@
                 saveButton.classList.remove('bg-slate-900', 'text-white', 'hover:bg-slate-800', 'hover:shadow-md', 'hover:-translate-y-0.5', 'cursor-pointer')
             }
         }
+
+        function renderMessages(state) {
+            if (!messagesSection || !messagesThread) return
+            const msgs = Array.isArray(state?.order?.messages) ? state.order.messages : []
+            const allowed = state?.permissions?.messagingAllowed !== false
+
+            messagesSection.classList.remove('hidden')
+            messagesThread.innerHTML = ''
+
+            if (!msgs.length) {
+                const p = document.createElement('div')
+                p.className = 'text-sm text-slate-500'
+                p.textContent = 'No messages yet.'
+                messagesThread.appendChild(p)
+            } else {
+                msgs.forEach(m => {
+                    const name = String(m?.name || '')
+                    const ts = String(m?.ts || '')
+                    const text = String(m?.text || '')
+                    const role = String(m?.role || '').toLowerCase()
+                    const tone = role === 'admin' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'
+
+                    const bubble = document.createElement('div')
+                    bubble.className = `rounded-2xl p-4 ${tone}`
+                    bubble.innerHTML = `
+                        <div class="text-xs opacity-80 font-semibold">${escapeHtml(name || 'User')} • ${escapeHtml(ts ? new Date(ts).toLocaleString() : '')}</div>
+                        <div class="mt-2 text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(text)}</div>
+                    `
+                    messagesThread.appendChild(bubble)
+                })
+            }
+
+            if (messageInput) messageInput.disabled = !allowed
+            if (messageSendBtn) messageSendBtn.disabled = !allowed
+            if (messagesLockedHint) messagesLockedHint.classList.toggle('hidden', !!allowed)
+        }
+
+        messageSendBtn?.addEventListener('click', () => {
+            if (!uiState) return
+            if (uiState?.permissions?.messagingAllowed === false) return
+            const text = String(messageInput?.value || '').trim()
+            if (!text) return
+            if (messageInput) messageInput.value = ''
+            postToHost({ type: 'TW_MESSAGE_SUBMIT', text })
+        })
 
         termsCheckbox.addEventListener('change', refreshSaveButtonState);
 
@@ -1220,6 +1335,251 @@
         const loadingState = document.getElementById('loadingState');
         const successState = document.getElementById('successState');
         const closeStatusModalBtn = document.getElementById('closeStatusModalBtn');
+        const confirmModal = document.getElementById('confirmModal')
+        const confirmModalContent = document.getElementById('confirmModalContent')
+        const confirmList = document.getElementById('confirmList')
+        const confirmCancelBtn = document.getElementById('confirmCancelBtn')
+        const confirmOkBtn = document.getElementById('confirmOkBtn')
+
+        let pendingSavePayload = null
+        let adminDecisionByRowKey = new Map() // rowKey -> status
+
+        const ADMIN_STATUSES = ['Pending (24h)', 'Approved', 'Waiting for Approval', 'Rejected', 'Canceled', 'Sent to Production']
+        const adminRequestsSection = document.getElementById('adminRequestsSection')
+        const adminRequestsList = document.getElementById('adminRequestsList')
+        const adminRequestsEmpty = document.getElementById('adminRequestsEmpty')
+        const adminApproveAllBtn = document.getElementById('adminApproveAllBtn')
+        const adminRejectAllBtn = document.getElementById('adminRejectAllBtn')
+        const adminSaveDecisionsBtn = document.getElementById('adminSaveDecisionsBtn')
+
+        function escapeHtml(s) {
+            return String(s || '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;')
+        }
+
+        function showConfirmModal(changes, itemsByRowKey) {
+            if (!confirmModal || !confirmList || !confirmModalContent) return false
+            confirmList.innerHTML = ''
+
+            for (const ch of changes) {
+                const base = itemsByRowKey.get(String(ch.rowKey || '')) || {}
+                const lines = []
+                function addLine(label, before, after) {
+                    const b = (before == null ? '' : String(before))
+                    const a = (after == null ? '' : String(after))
+                    if (b === a) return
+                    lines.push({ label, before: b || '—', after: a || '—' })
+                }
+                addLine('Size', base.size || '', ch.size || '')
+                addLine('Color', base.colorLabel || base.color || '', ch.colorLabel || ch.color || '')
+                addLine('Name/Number', base.nameNumber || '', ch.nameNumber || '')
+
+                const title = (ch.productName || base.productName || 'Item').toString()
+                const badge = (base.rowKey || ch.rowKey || '').toString()
+
+                const wrap = document.createElement('div')
+                wrap.className = 'rounded-2xl border border-slate-200 bg-white p-4'
+                wrap.innerHTML = `
+                    <div class="flex items-start justify-between gap-3">
+                        <div class="min-w-0">
+                            <div class="font-extrabold text-slate-900">${escapeHtml(title)}</div>
+                            <div class="text-xs text-slate-500 mt-1">Row: ${escapeHtml(badge || '—')}</div>
+                        </div>
+                    </div>
+                `
+
+                if (!lines.length) {
+                    const p = document.createElement('div')
+                    p.className = 'text-sm text-slate-500 mt-3'
+                    p.textContent = 'No visible field changes detected.'
+                    wrap.appendChild(p)
+                } else {
+                    const ul = document.createElement('div')
+                    ul.className = 'mt-3 space-y-2'
+                    for (const ln of lines) {
+                        const row = document.createElement('div')
+                        row.className = 'grid grid-cols-12 gap-2 items-start text-sm'
+                        row.innerHTML =
+                            `<div class="col-span-3 text-slate-500 font-semibold">${escapeHtml(ln.label)}</div>` +
+                            `<div class="col-span-4 text-slate-700"><span class="text-slate-400">from</span> ${escapeHtml(ln.before)}</div>` +
+                            `<div class="col-span-5 text-slate-900 font-semibold"><span class="text-slate-400 font-normal">to</span> ${escapeHtml(ln.after)}</div>`
+                        ul.appendChild(row)
+                    }
+                    wrap.appendChild(ul)
+                }
+
+                confirmList.appendChild(wrap)
+            }
+
+            confirmModal.classList.remove('hidden')
+            void confirmModal.offsetWidth
+            confirmModal.classList.remove('opacity-0')
+            confirmModalContent.classList.remove('scale-95')
+            return true
+        }
+
+        function hideConfirmModal() {
+            if (!confirmModal || !confirmModalContent) return
+            confirmModal.classList.add('opacity-0')
+            confirmModalContent.classList.add('scale-95')
+            window.setTimeout(() => {
+                confirmModal.classList.add('hidden')
+            }, 220)
+        }
+
+        confirmCancelBtn?.addEventListener('click', () => {
+            pendingSavePayload = null
+            hideConfirmModal()
+        })
+
+        confirmOkBtn?.addEventListener('click', () => {
+            const payload = pendingSavePayload
+            pendingSavePayload = null
+            hideConfirmModal()
+            if (!payload) return
+
+            statusModal.classList.remove('hidden')
+            void statusModal.offsetWidth
+            statusModal.classList.remove('opacity-0')
+            statusModalContent.classList.remove('scale-95')
+            loadingState.classList.remove('hidden')
+            successState.classList.add('hidden')
+
+            if (Array.isArray(payload.adminDecisions)) {
+                postToHost({ type: 'TW_ADMIN_DECISIONS_SUBMIT', decisions: payload.adminDecisions })
+                return
+            }
+
+            postToHost({ type: HOST_TYPES.SAVE_SUBMIT, changes: payload.changes })
+        })
+
+        function renderAdminRequests(state) {
+            const isAdmin = !!state?.permissions?.isAdminMode
+            if (!adminRequestsSection || !adminRequestsList || !adminRequestsEmpty) return
+
+            if (!isAdmin) {
+                adminRequestsSection.classList.add('hidden')
+                return
+            }
+
+            const items = Array.isArray(state?.items) ? state.items : []
+            const requested = items.filter(it => !!it?.persistedChanged)
+
+            adminRequestsList.innerHTML = ''
+            if (!requested.length) {
+                adminRequestsEmpty.classList.remove('hidden')
+                adminRequestsSection.classList.remove('hidden')
+                return
+            }
+            adminRequestsEmpty.classList.add('hidden')
+            adminRequestsSection.classList.remove('hidden')
+
+            requested.forEach(it => {
+                const rowKey = String(it?.rowKey || '')
+                const current = adminDecisionByRowKey.get(rowKey) || 'Waiting for Approval'
+
+                const card = document.createElement('div')
+                card.className = 'rounded-2xl border border-slate-200 bg-white p-4'
+
+                const title = escapeHtml(it?.productName || 'Item')
+                const summary = buildDiffSummary(it)
+
+                card.innerHTML = `
+                    <div class="flex items-start justify-between gap-4">
+                        <div class="min-w-0">
+                            <div class="font-extrabold text-slate-900">${title}</div>
+                            <div class="text-xs text-slate-500 mt-1">Row: ${escapeHtml(rowKey || '—')}</div>
+                            <div class="text-sm text-slate-600 mt-2">${summary || ''}</div>
+                        </div>
+                        <div class="shrink-0 flex flex-col gap-2 items-end">
+                            <label class="text-xs font-semibold text-slate-500 uppercase tracking-[0.14em]">Decision</label>
+                            <select data-rowkey="${escapeHtml(rowKey)}" class="adminDecisionSelect w-[230px] border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-semibold bg-white focus:outline-none focus:ring-2 focus:ring-brand-500">
+                                ${ADMIN_STATUSES.map(s => `<option value="${escapeHtml(s)}"${s===current?' selected':''}>${escapeHtml(s)}</option>`).join('')}
+                            </select>
+                        </div>
+                    </div>
+                `
+
+                adminRequestsList.appendChild(card)
+            })
+
+            Array.from(adminRequestsList.querySelectorAll('.adminDecisionSelect')).forEach(sel => {
+                sel.addEventListener('change', () => {
+                    const rk = String(sel.getAttribute('data-rowkey') || '')
+                    const v = String(sel.value || '')
+                    if (!rk) return
+                    adminDecisionByRowKey.set(rk, v)
+                })
+            })
+        }
+
+        function buildDiffSummary(item) {
+            const parts = []
+            const os = item?.originalSize || ''
+            const ns = item?.size || ''
+            if (String(os) !== String(ns)) parts.push(`Size: ${escapeHtml(os || '—')} → ${escapeHtml(ns || '—')}`)
+
+            const oc = item?.originalColorLabel || item?.originalColor || ''
+            const nc = item?.colorLabel || item?.color || ''
+            if (String(oc) !== String(nc)) parts.push(`Color: ${escapeHtml(oc || '—')} → ${escapeHtml(nc || '—')}`)
+
+            const on = item?.originalNameNumber || ''
+            const nn = item?.nameNumber || ''
+            if (String(on) !== String(nn)) parts.push(`Name/Number: ${escapeHtml(on || '—')} → ${escapeHtml(nn || '—')}`)
+
+            return parts.length ? parts.join(' • ') : 'Changes detected'
+        }
+
+        adminApproveAllBtn?.addEventListener('click', () => {
+            if (!uiState || !Array.isArray(uiState.items)) return
+            uiState.items.filter(it => !!it?.persistedChanged).forEach(it => adminDecisionByRowKey.set(String(it.rowKey || ''), 'Approved'))
+            renderAdminRequests(uiState)
+        })
+
+        adminRejectAllBtn?.addEventListener('click', () => {
+            if (!uiState || !Array.isArray(uiState.items)) return
+            uiState.items.filter(it => !!it?.persistedChanged).forEach(it => adminDecisionByRowKey.set(String(it.rowKey || ''), 'Rejected'))
+            renderAdminRequests(uiState)
+        })
+
+        adminSaveDecisionsBtn?.addEventListener('click', () => {
+            if (!uiState || !Array.isArray(uiState.items)) return
+            const requested = uiState.items.filter(it => !!it?.persistedChanged)
+            if (!requested.length) return
+
+            const decisions = requested.map(it => ({
+                itemId: it.itemId || '',
+                rowKey: it.rowKey || '',
+                status: adminDecisionByRowKey.get(String(it.rowKey || '')) || 'Waiting for Approval',
+                productName: it.productName || ''
+            }))
+
+            // reuse confirm modal as double confirmation
+            pendingSavePayload = { adminDecisions: decisions }
+            if (confirmList) {
+                confirmList.innerHTML = ''
+                decisions.forEach(d => {
+                    const wrap = document.createElement('div')
+                    wrap.className = 'rounded-2xl border border-slate-200 bg-white p-4'
+                    wrap.innerHTML = `
+                        <div class="font-extrabold text-slate-900">${escapeHtml(d.productName || 'Item')}</div>
+                        <div class="text-xs text-slate-500 mt-1">Row: ${escapeHtml(d.rowKey || '—')}</div>
+                        <div class="text-sm text-slate-700 mt-3"><span class="text-slate-400">Decision:</span> <span class="font-extrabold">${escapeHtml(d.status || '')}</span></div>
+                    `
+                    confirmList.appendChild(wrap)
+                })
+                confirmModal.classList.remove('hidden')
+                void confirmModal.offsetWidth
+                confirmModal.classList.remove('opacity-0')
+                confirmModalContent.classList.remove('scale-95')
+            } else {
+                postToHost({ type: 'TW_ADMIN_DECISIONS_SUBMIT', decisions })
+            }
+        })
 
         saveButton.addEventListener('click', () => {
             log('save button clicked', {
@@ -1257,15 +1617,21 @@
             }
             log('save submitting changes', { changeCount: changes.length, rowKeys: changes.map(x => x.rowKey) })
 
-            // Show status modal (loading)
-            statusModal.classList.remove('hidden')
-            void statusModal.offsetWidth
-            statusModal.classList.remove('opacity-0')
-            statusModalContent.classList.remove('scale-95')
-            loadingState.classList.remove('hidden')
-            successState.classList.add('hidden')
+            const itemsByRowKey = new Map()
+            for (const it of uiState.items) itemsByRowKey.set(String(it.rowKey || ''), it)
+            pendingSavePayload = { changes }
 
-            postToHost({ type: HOST_TYPES.SAVE_SUBMIT, changes })
+            const opened = showConfirmModal(changes, itemsByRowKey)
+            if (!opened) {
+                pendingSavePayload = null
+                statusModal.classList.remove('hidden')
+                void statusModal.offsetWidth
+                statusModal.classList.remove('opacity-0')
+                statusModalContent.classList.remove('scale-95')
+                loadingState.classList.remove('hidden')
+                successState.classList.add('hidden')
+                postToHost({ type: HOST_TYPES.SAVE_SUBMIT, changes })
+            }
         })
 
         const hideStatusModal = () => {
@@ -1438,6 +1804,8 @@
                         renderItemsTable(uiState)
                     }
                 }
+                renderAdminRequests(uiState)
+                renderMessages(uiState)
                 refreshSaveButtonState()
 
                 // hide auth if we now have order number
@@ -1489,6 +1857,13 @@
                 log('received TW_LOCK_EDITING', { locked: !!d.locked, reason: d.reason || '' })
                 lockedByHost = !!d.locked
                 syncEditingLockState()
+                return
+            }
+
+            if (d.type === 'TW_MESSAGE_RESULT') {
+                if (!d.ok) {
+                    log('message send failed', { message: d.message || '' })
+                }
                 return
             }
         })
