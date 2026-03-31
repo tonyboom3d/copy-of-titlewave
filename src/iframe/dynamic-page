@@ -164,6 +164,18 @@
             </div>
         </section>
 
+        <section id="adminSessionBar" class="hidden">
+            <div class="bg-slate-900 text-white rounded-2xl px-5 py-4 flex items-center justify-between gap-4 shadow-sm">
+                <div class="min-w-0">
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-white/70">Admin Session</p>
+                    <p class="text-sm md:text-base text-white/90 mt-1">You are signed in as customer service on this device.</p>
+                </div>
+                <button id="adminLogoutBtn" class="shrink-0 px-4 py-2 rounded-xl bg-white text-slate-900 font-extrabold hover:bg-slate-100 transition-colors">
+                    Log out
+                </button>
+            </div>
+        </section>
+
         <!-- Admin: change requests -->
         <section id="adminRequestsSection" class="hidden">
             <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
@@ -541,10 +553,14 @@
             AUTH_RESULT: 'TW_AUTH_RESULT',
             SAVE_SUBMIT: 'TW_SAVE_SUBMIT',
             SAVE_RESULT: 'TW_SAVE_RESULT',
-            LOCK_EDITING: 'TW_LOCK_EDITING'
+            LOCK_EDITING: 'TW_LOCK_EDITING',
+            ADMIN_LOGOUT: 'TW_ADMIN_LOGOUT',
+            ADMIN_LOGOUT_RESULT: 'TW_ADMIN_LOGOUT_RESULT'
         }
 
         const LOG_NS = '[TW iframe UI]'
+        const ADMIN_SESSION_KEY = 'tw_admin_session_v1'
+        const ADMIN_SESSION_TTL_MS = 3 * 24 * 60 * 60 * 1000
 
         function log(...args) {
             console.log(LOG_NS, ...args)
@@ -558,6 +574,93 @@
             return `${s.slice(0, 2)}...@${s.slice(at + 1)}`
         }
 
+        function readAdminSession() {
+            try {
+                const raw = window.localStorage.getItem(ADMIN_SESSION_KEY)
+                if (!raw) return null
+                const parsed = JSON.parse(raw)
+                const accessCode = String(parsed?.accessCode || '').trim()
+                const expiresAt = Number(parsed?.expiresAt || 0)
+                if (!accessCode || !expiresAt || expiresAt <= Date.now()) {
+                    window.localStorage.removeItem(ADMIN_SESSION_KEY)
+                    return null
+                }
+                return { accessCode, expiresAt }
+            } catch (error) {
+                console.warn(LOG_NS, 'failed reading admin session', error)
+                return null
+            }
+        }
+
+        function saveAdminSession(accessCode) {
+            const normalized = String(accessCode || '').trim()
+            if (!normalized) return
+            try {
+                window.localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify({
+                    accessCode: normalized,
+                    expiresAt: Date.now() + ADMIN_SESSION_TTL_MS
+                }))
+            } catch (error) {
+                console.warn(LOG_NS, 'failed saving admin session', error)
+            }
+        }
+
+        function clearAdminSession() {
+            try {
+                window.localStorage.removeItem(ADMIN_SESSION_KEY)
+            } catch (error) {
+                console.warn(LOG_NS, 'failed clearing admin session', error)
+            }
+        }
+
+        function updateAdminSessionUi(isAdmin) {
+            if (adminSessionBar) adminSessionBar.classList.toggle('hidden', !isAdmin)
+        }
+
+        function startAdminAuthLoading() {
+            authSubmitBtn.setAttribute('disabled', 'true')
+            authSubmitBtn.classList.add('opacity-80', 'cursor-not-allowed')
+            authBtnText.classList.add('opacity-0')
+            authBtnSpinner.classList.remove('hidden')
+        }
+
+        function attemptStoredAdminLogin() {
+            if (attemptedStoredAdminLogin || hostInit.isAdminMode) return false
+            const session = readAdminSession()
+            if (!session) return false
+
+            attemptedStoredAdminLogin = true
+            awaitingStoredAdminLogin = true
+            setAuthMode('admin-code')
+            authAdminCode.value = session.accessCode
+            authErrorMsg.classList.add('hidden')
+            startAdminAuthLoading()
+            postToHost({ type: HOST_TYPES.AUTH_SUBMIT, mode: 'admin-code', adminCode: session.accessCode })
+            return true
+        }
+
+        function promptRefreshAfterLogout() {
+            const shouldRefresh = window.confirm('The admin session was removed from this device. Refresh the page now?')
+            if (shouldRefresh) {
+                window.location.reload()
+            }
+        }
+
+        function buildAvatarDataUri(kind) {
+            const isAdmin = kind === 'admin'
+            const bg = isAdmin ? '#0f172a' : '#e2e8f0'
+            const fg = isAdmin ? '#ffffff' : '#334155'
+            const label = isAdmin ? 'CS' : 'U'
+            const sub = isAdmin ? 'support' : 'user'
+            const svg =
+                `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">` +
+                `<rect width="64" height="64" rx="32" fill="${bg}"/>` +
+                `<text x="32" y="30" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="${fg}">${label}</text>` +
+                `<text x="32" y="46" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="${fg}" opacity="0.85">${sub}</text>` +
+                `</svg>`
+            return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+        }
+
         let hostInit = { orderId: '', isAdminMode: false }
         let uiState = null
         let lockedEditing = false
@@ -566,6 +669,8 @@
         let bypassTimeWindow = false
         let authMode = 'customer'
         let postSaveSummaryVisible = false
+        let attemptedStoredAdminLogin = false
+        let awaitingStoredAdminLogin = false
         let draftByRowKey = new Map() // rowKey -> partial fields
         let baseItemsByRowKey = new Map()
         const messagesSection = document.getElementById('messagesSection')
@@ -573,6 +678,8 @@
         const messageInput = document.getElementById('messageInput')
         const messageSendBtn = document.getElementById('messageSendBtn')
         const messagesLockedHint = document.getElementById('messagesLockedHint')
+        const adminSessionBar = document.getElementById('adminSessionBar')
+        const adminLogoutBtn = document.getElementById('adminLogoutBtn')
 
         function postToHost(payload) {
             try {
@@ -728,17 +835,25 @@
                 messagesThread.appendChild(p)
             } else {
                 msgs.forEach(m => {
-                    const name = String(m?.name || '')
+                    const role = String(m?.role || '').toLowerCase()
+                    const isAdminMessage = role === 'admin'
+                    const name = String(m?.displayName || m?.name || '')
                     const ts = String(m?.ts || '')
                     const text = String(m?.text || '')
-                    const role = String(m?.role || '').toLowerCase()
-                    const tone = role === 'admin' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'
+                    const tone = isAdminMessage ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'
+                    const displayName = isAdminMessage ? 'Customer Service' : (name || 'Customer')
+                    const avatarSrc = buildAvatarDataUri(isAdminMessage ? 'admin' : 'user')
 
                     const bubble = document.createElement('div')
                     bubble.className = `rounded-2xl p-4 ${tone}`
                     bubble.innerHTML = `
-                        <div class="text-xs opacity-80 font-semibold">${escapeHtml(name || 'User')} • ${escapeHtml(ts ? new Date(ts).toLocaleString() : '')}</div>
-                        <div class="mt-2 text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(text)}</div>
+                        <div class="flex items-start gap-3">
+                            <img src="${avatarSrc}" alt="${escapeHtml(displayName)}" class="w-10 h-10 rounded-full border border-white/20 shrink-0 object-cover">
+                            <div class="min-w-0 flex-1">
+                                <div class="text-xs opacity-80 font-semibold">${escapeHtml(displayName)} • ${escapeHtml(ts ? new Date(ts).toLocaleString() : '')}</div>
+                                <div class="mt-2 text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(text)}</div>
+                            </div>
+                        </div>
                     `
                     messagesThread.appendChild(bubble)
                 })
@@ -1142,8 +1257,17 @@
 
         function ensureOption(options, value, label = value) {
             const normalizedValue = String(value || '')
+            const normalizedLabel = String(label || '')
             if (!normalizedValue) return options
-            const exists = options.some(option => String(option?.value || '').toLowerCase() === normalizedValue.toLowerCase())
+            const exists = options.some(option => {
+                const optionValue = String(option?.value || '').toLowerCase()
+                const optionLabel = String(option?.label || option?.value || '').toLowerCase()
+                return (
+                    optionValue === normalizedValue.toLowerCase() ||
+                    optionLabel === normalizedValue.toLowerCase() ||
+                    (!!normalizedLabel && optionLabel === normalizedLabel.toLowerCase())
+                )
+            })
             if (exists) return options
             return [{ value: normalizedValue, label: label || normalizedValue }, ...options]
         }
@@ -1802,6 +1926,10 @@
 
         adminLoginToggleBtn.addEventListener('click', () => setAuthMode('admin-code'))
         customerLoginToggleBtn.addEventListener('click', () => setAuthMode('customer'))
+        adminLogoutBtn?.addEventListener('click', () => {
+            clearAdminSession()
+            postToHost({ type: HOST_TYPES.ADMIN_LOGOUT })
+        })
 
         authSubmitBtn.addEventListener('click', () => {
             log('verify button clicked')
@@ -1824,10 +1952,7 @@
                     return;
                 }
 
-                authSubmitBtn.setAttribute('disabled', 'true');
-                authSubmitBtn.classList.add('opacity-80', 'cursor-not-allowed');
-                authBtnText.classList.add('opacity-0');
-                authBtnSpinner.classList.remove('hidden');
+                startAdminAuthLoading()
 
                 log('sending TW_AUTH_SUBMIT admin-code')
                 postToHost({ type: HOST_TYPES.AUTH_SUBMIT, mode: 'admin-code', adminCode: adminCodeVal })
@@ -1894,6 +2019,10 @@
                 if (hostInit.isAdminMode) {
                     authModal.classList.add('hidden')
                     document.body.classList.remove('overflow-hidden')
+                    updateAdminSessionUi(true)
+                } else {
+                    updateAdminSessionUi(false)
+                    attemptStoredAdminLogin()
                 }
                 syncEditingLockState()
                 return
@@ -1912,6 +2041,7 @@
                 }
                 renderAdminRequests(uiState)
                 renderMessages(uiState)
+                updateAdminSessionUi(!!uiState?.permissions?.isAdminMode)
                 refreshSaveButtonState()
 
                 // hide auth if we now have order number
@@ -1929,6 +2059,10 @@
                 log('received TW_AUTH_RESULT', { ok: !!d.ok, message: d.message || '' })
                 finishAuthLoadingWithDelay(() => {
                     if (!d.ok) {
+                        if (awaitingStoredAdminLogin) {
+                            clearAdminSession()
+                            awaitingStoredAdminLogin = false
+                        }
                         if (authErrorText && d.message) authErrorText.textContent = String(d.message)
                         authErrorMsg.classList.remove('hidden')
                         if (authMode === 'admin-code') {
@@ -1937,6 +2071,10 @@
                             authOrderNumber.classList.add('border-red-500')
                             authEmail.classList.add('border-red-500')
                         }
+                    } else if (authMode === 'admin-code') {
+                        saveAdminSession(authAdminCode.value || '')
+                        awaitingStoredAdminLogin = false
+                        updateAdminSessionUi(true)
                     }
                 })
                 return
@@ -1970,6 +2108,19 @@
                 if (!d.ok) {
                     log('message send failed', { message: d.message || '' })
                 }
+                return
+            }
+
+            if (d.type === HOST_TYPES.ADMIN_LOGOUT_RESULT) {
+                clearAdminSession()
+                updateAdminSessionUi(false)
+                uiState = null
+                draftByRowKey = new Map()
+                baseItemsByRowKey = new Map()
+                setAuthMode('customer')
+                authModal.classList.remove('hidden')
+                document.body.classList.add('overflow-hidden')
+                promptRefreshAfterLogout()
                 return
             }
         })
