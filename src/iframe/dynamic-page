@@ -171,7 +171,7 @@
                     <p class="text-sm md:text-base text-white/90 mt-1">You are signed in as customer service on this device.</p>
                 </div>
                 <button id="adminLogoutBtn" class="shrink-0 px-4 py-2 rounded-xl bg-white text-slate-900 font-extrabold hover:bg-slate-100 transition-colors">
-                    Log out
+                    Logout As Admin
                 </button>
             </div>
         </section>
@@ -559,9 +559,6 @@
         }
 
         const LOG_NS = '[TW iframe UI]'
-        const ADMIN_SESSION_KEY = 'tw_admin_session_v1'
-        const ADMIN_SESSION_TTL_MS = 3 * 24 * 60 * 60 * 1000
-
         function log(...args) {
             console.log(LOG_NS, ...args)
         }
@@ -575,42 +572,15 @@
         }
 
         function readAdminSession() {
-            try {
-                const raw = window.localStorage.getItem(ADMIN_SESSION_KEY)
-                if (!raw) return null
-                const parsed = JSON.parse(raw)
-                const accessCode = String(parsed?.accessCode || '').trim()
-                const expiresAt = Number(parsed?.expiresAt || 0)
-                if (!accessCode || !expiresAt || expiresAt <= Date.now()) {
-                    window.localStorage.removeItem(ADMIN_SESSION_KEY)
-                    return null
-                }
-                return { accessCode, expiresAt }
-            } catch (error) {
-                console.warn(LOG_NS, 'failed reading admin session', error)
-                return null
-            }
+            return null
         }
 
         function saveAdminSession(accessCode) {
-            const normalized = String(accessCode || '').trim()
-            if (!normalized) return
-            try {
-                window.localStorage.setItem(ADMIN_SESSION_KEY, JSON.stringify({
-                    accessCode: normalized,
-                    expiresAt: Date.now() + ADMIN_SESSION_TTL_MS
-                }))
-            } catch (error) {
-                console.warn(LOG_NS, 'failed saving admin session', error)
-            }
+            return accessCode
         }
 
         function clearAdminSession() {
-            try {
-                window.localStorage.removeItem(ADMIN_SESSION_KEY)
-            } catch (error) {
-                console.warn(LOG_NS, 'failed clearing admin session', error)
-            }
+            return true
         }
 
         function updateAdminSessionUi(isAdmin) {
@@ -625,18 +595,7 @@
         }
 
         function attemptStoredAdminLogin() {
-            if (attemptedStoredAdminLogin || hostInit.isAdminMode) return false
-            const session = readAdminSession()
-            if (!session) return false
-
-            attemptedStoredAdminLogin = true
-            awaitingStoredAdminLogin = true
-            setAuthMode('admin-code')
-            authAdminCode.value = session.accessCode
-            authErrorMsg.classList.add('hidden')
-            startAdminAuthLoading()
-            postToHost({ type: HOST_TYPES.AUTH_SUBMIT, mode: 'admin-code', adminCode: session.accessCode })
-            return true
+            return false
         }
 
         function promptRefreshAfterLogout() {
@@ -2114,10 +2073,16 @@
             if (d.type === HOST_TYPES.SAVE_RESULT) {
                 log('received TW_SAVE_RESULT', { ok: !!d.ok, message: d.message || '', newStatus: d.newStatus || '' })
                 if (d.ok) {
-                    hideStatusModal()
                     draftByRowKey = new Map()
-                    showPostSaveSummary(d.newStatus || 'Waiting for Approval')
                     refreshSaveButtonState()
+                    if (uiState?.permissions?.isAdminMode) {
+                        loadingState.classList.add('hidden')
+                        setStatusResultState({ ok: true, message: 'Admin decisions were saved successfully.' })
+                        successState.classList.remove('hidden')
+                    } else {
+                        hideStatusModal()
+                        showPostSaveSummary(d.newStatus || 'Waiting for Approval')
+                    }
                 } else {
                     setStatusResultState({ ok: false, message: d.message ? String(d.message) : 'Failed to save changes.' })
                     loadingState.classList.add('hidden')
