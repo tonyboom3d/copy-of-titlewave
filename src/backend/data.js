@@ -15,6 +15,11 @@ function normalizeStatus(statusValue) {
     return String(statusValue || '').trim()
 }
 
+function isRevertStatus(st) {
+    const lower = String(st || '').trim().toLowerCase()
+    return lower === 'rejected' || lower === 'canceled' || lower === 'cancelled'
+}
+
 function buildItemPayloads(item) {
     const orderStatus = normalizeStatus(item?.orderStatus)
     const comment = item?.backOfficeMsg || ''
@@ -22,17 +27,55 @@ function buildItemPayloads(item) {
         ? item.newLineItems
         : (Array.isArray(item?.lineItems) ? item.lineItems : [])
 
+    // Build lookup of original snapshot values by itemId
+    const snapshots = Array.isArray(item?.lineItems) ? item.lineItems : []
+    const origByItemId = new Map()
+    for (const snap of snapshots) {
+        const id = String(snap?.itemId || '').trim()
+        if (id) origByItemId.set(id, snap)
+    }
+
     const itemPayloads = primaryItems
         .filter(entry => String(entry?.itemId || '').trim())
-        .map(entry => ({
-            action: 'updateOrder',
-            sheetTitle: item?.sheetName || 'Sheet1',
-            orderId: item?.orderId || '',
-            orderNumber: item?.orderNumber || '',
-            itemId: String(entry?.itemId || '').trim(),
-            status: normalizeStatus(entry?.status) || orderStatus,
-            comment
-        }))
+        .map(entry => {
+            const entryItemId = String(entry?.itemId || '').trim()
+            const entryStatus = normalizeStatus(entry?.status) || orderStatus
+
+            // For Rejected/Canceled: send original values back to Sheets
+            if (isRevertStatus(entryStatus)) {
+                const orig = origByItemId.get(entryItemId) || {}
+                const origName = String(orig.nameNumber || orig.name || '').trim()
+                const origNumber = String(orig.number || '').trim()
+                const displayNameNumber = origName
+                    ? (origNumber && !origName.includes(origNumber) ? `${origName} ${origNumber}` : origName)
+                    : origNumber
+                return {
+                    action: 'updateOrder',
+                    sheetTitle: item?.sheetName || 'Sheet1',
+                    orderId: item?.orderId || '',
+                    orderNumber: item?.orderNumber || '',
+                    itemId: entryItemId,
+                    status: entryStatus,
+                    comment,
+                    // Original field values to overwrite the changed ones in Sheets
+                    size: String(orig.size || '').trim(),
+                    color: String(orig.colorLabel || orig.color || '').trim(),
+                    nameNumber: displayNameNumber,
+                    playerLastName: String(orig.playerLastName || '').trim(),
+                    revertedToOriginal: true
+                }
+            }
+
+            return {
+                action: 'updateOrder',
+                sheetTitle: item?.sheetName || 'Sheet1',
+                orderId: item?.orderId || '',
+                orderNumber: item?.orderNumber || '',
+                itemId: entryItemId,
+                status: entryStatus,
+                comment
+            }
+        })
 
     if (itemPayloads.length) return itemPayloads
 

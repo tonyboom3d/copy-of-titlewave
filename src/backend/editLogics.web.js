@@ -339,6 +339,20 @@ export const applyAdminDecisions = webMethod(Permissions.Anyone, async (orderId,
         const decs = Array.isArray(decisions) ? decisions : []
         const byKey = new Map(decs.map(d => [String(d?.rowKey || d?.itemId || ''), String(d?.status || '').trim()]))
 
+        const baseSnapshots = Array.isArray(rec.lineItems) ? rec.lineItems.slice() : []
+
+        // Build a lookup: itemId → original snapshot fields (size, color, nameNumber, etc.)
+        const originalByItemId = new Map()
+        for (const snap of baseSnapshots) {
+            const ik = String(snap?.itemId || '').trim()
+            if (ik) originalByItemId.set(ik, snap)
+        }
+
+        function isRevertStatus(st) {
+            const lower = String(st || '').trim().toLowerCase()
+            return lower === 'rejected' || lower === 'canceled' || lower === 'cancelled'
+        }
+
         const items = Array.isArray(rec.newLineItems) ? rec.newLineItems.slice() : []
         const nextItems = items.map(it => {
             const rk = String(it?.rowKey || '')
@@ -346,9 +360,29 @@ export const applyAdminDecisions = webMethod(Permissions.Anyone, async (orderId,
             const k = rk || ik
             const st = byKey.get(k)
             if (!st) return it
+            if (isRevertStatus(st)) {
+                // Revert fields to original snapshot values for this item
+                const orig = originalByItemId.get(ik) || {}
+                return {
+                    ...(it || {}),
+                    status: st,
+                    size: orig.size != null ? orig.size : it.size,
+                    color: orig.color != null ? orig.color : it.color,
+                    colorLabel: orig.colorLabel != null ? orig.colorLabel : it.colorLabel,
+                    colorHex: orig.colorHex != null ? orig.colorHex : it.colorHex,
+                    image: orig.image != null ? orig.image : it.image,
+                    nameNumber: orig.nameNumber != null
+                        ? orig.nameNumber
+                        : (orig.name || orig.number
+                            ? `${orig.name || ''} ${orig.number || ''}`.trim()
+                            : it.nameNumber),
+                    playerLastName: orig.playerLastName != null ? orig.playerLastName : it.playerLastName,
+                    reverted: true
+                }
+            }
             return { ...(it || {}), status: st }
         })
-        const baseSnapshots = Array.isArray(rec.lineItems) ? rec.lineItems.slice() : []
+
         const nextSnapshots = baseSnapshots.map(it => {
             const ik = String(it?.itemId || '')
             const st = byKey.get(ik)

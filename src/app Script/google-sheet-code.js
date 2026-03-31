@@ -207,15 +207,23 @@ function sendUpdateToWix(sheet, startRow, numRows) {
 }
 
 // פונקציה חדשה לעדכון הגיליון מקריאות של Wix
+function resolveRevertCols(sheet) {
+  const hm = getHeaderMap(sheet);
+  return {
+    colorCol:      hm.get(normalizeHeader('Color'))  || 4,
+    sizeCol:       hm.get(normalizeHeader('Size'))   || 5,
+    nameCol:       hm.get(normalizeHeader('NAME'))   || 7,
+    numberCol:     hm.get(normalizeHeader('Number')) || 8
+  };
+}
+
 function updateRowFromWix(body) {
   const ss = getSpreadsheet();
-  // אם לא סופק שם גיליון ספציפי, עובד על הגיליון הראשון (ברירת מחדל)
   const sheet = body.sheetTitle ? ss.getSheetByName(body.sheetTitle) : ss.getSheets()[0];
-  
   if (!sheet) return respond({ ok: false, error: 'Sheet not found' });
 
   const cols = resolveCols(sheet);
-  
+
   const orderNumber = body.orderNumber != null ? String(body.orderNumber) : '';
   const itemId = body.itemId != null ? String(body.itemId) : '';
   if (!orderNumber) return respond({ ok: false, error: 'Missing orderNumber' });
@@ -227,17 +235,50 @@ function updateRowFromWix(body) {
   sheet.getRange(row, cols.statusCol).setValue(body.status || '');
   sheet.getRange(row, cols.commentCol).setValue(body.comment || '');
 
+  // If Rejected/Canceled: revert product fields to original values
+  const statusLower = String(body.status || '').trim().toLowerCase();
+  const isReverted = body.revertedToOriginal === true ||
+    statusLower === 'rejected' || statusLower === 'canceled' || statusLower === 'cancelled';
+
+  if (isReverted) {
+    const rc = resolveRevertCols(sheet);
+    if (body.color       != null) sheet.getRange(row, rc.colorCol).setValue(body.color);
+    if (body.size        != null) sheet.getRange(row, rc.sizeCol).setValue(body.size);
+    if (body.nameNumber  != null) {
+      // Split nameNumber back into NAME / Number columns (number = trailing digits)
+      const fullName = String(body.nameNumber || '').trim();
+      const numMatch = fullName.match(/^(.*?)\s+(\d+)$/) || fullName.match(/^(\d+)$/);
+      if (numMatch && numMatch[2]) {
+        sheet.getRange(row, rc.nameCol).setValue(numMatch[1].trim());
+        sheet.getRange(row, rc.numberCol).setValue(numMatch[2]);
+      } else if (numMatch && numMatch[1] && /^\d+$/.test(numMatch[1])) {
+        sheet.getRange(row, rc.nameCol).setValue('');
+        sheet.getRange(row, rc.numberCol).setValue(numMatch[1]);
+      } else {
+        sheet.getRange(row, rc.nameCol).setValue(fullName);
+        sheet.getRange(row, rc.numberCol).setValue('');
+      }
+    }
+    if (body.playerLastName != null) {
+      // player last name is part of NAME column if separate or append
+      const rc2 = resolveRevertCols(sheet);
+      // Only overwrite if we have a dedicated last name column, otherwise skip
+      const hm = getHeaderMap(sheet);
+      const lastNameCol = hm.get(normalizeHeader('Player Last Name')) || hm.get(normalizeHeader('Last Name')) || null;
+      if (lastNameCol) sheet.getRange(row, lastNameCol).setValue(body.playerLastName);
+    }
+  }
+
   // Last update
   const timestampStr = Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yy HH:mm:ss');
   sheet.getRange(row, cols.lastUpdateCol).setValue(timestampStr);
 
   // Row color
-  const val = String(body.status || '').trim().toLowerCase();
-  const color = getStatusColor(val);
+  const color = getStatusColor(statusLower);
   const lastCol = sheet.getLastColumn();
   sheet.getRange(row, 1, 1, Math.max(lastCol, cols.lastUpdateCol)).setBackground(color);
 
-  return respond({ ok: true, rowUpdated: row });
+  return respond({ ok: true, rowUpdated: row, reverted: isReverted });
 }
 
 /***** CORE *****/
