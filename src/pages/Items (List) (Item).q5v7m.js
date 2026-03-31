@@ -158,11 +158,7 @@ let currentAdminCode = ''
 const productOptionsCache = new Map()
 
 function postToUi(message) {
-    if (!uiHtml) {
-        log('postToUi skipped — no HTML component', summarizeOutboundMessage(message))
-        return
-    }
-    log('→ iframe', summarizeOutboundMessage(message))
+    if (!uiHtml) return
     uiHtml.postMessage(message, IFRAME_ORIGIN)
 }
 
@@ -268,6 +264,14 @@ function buildRows(lineItems) {
     lineItems.forEach((lineItem, itemIndex) => {
         const descriptionLines = lineItem?.descriptionLines || []
         const customTextFields = Array.isArray(lineItem?.customTextFields) ? lineItem.customTextFields : []
+        const rawDescNames = descriptionLines.map(l => `${descName(l)}=${descVal(l)}`).join(' | ')
+        const rawCtf = customTextFields.map(f => `${f?.title || f?.name}=${f?.value}`).join(' | ')
+        const extractedNameNumber = extractNameNumber(descriptionLines, customTextFields)
+        console.log('[TW items] item', itemIndex, 'nameNumber:', {
+            result: extractedNameNumber,
+            descLines: rawDescNames || '(none)',
+            customFields: rawCtf || '(none)'
+        })
         const hasNameNumberField = descriptionLines.some(line => {
             const name = lower(descName(line))
             if (name.includes('last name')) return false
@@ -513,12 +517,46 @@ async function getProductOptionSets(productId, currentItem = {}) {
     }
 }
 
-async function buildUiItems(lineItems, savedItems = []) {
+async function buildUiItems(lineItems, savedItems = [], snapshotItems = []) {
     const fromOrder = buildRows(lineItems)
-    const rows =
+    let rows =
         fromOrder.length > 0
             ? mergeSavedPatchesIntoRows(fromOrder, savedItems)
             : buildRowsFromSavedItems(savedItems)
+
+    // Fallback: fill empty nameNumber/playerLastName from CMS lineItems snapshot (has name/number from export)
+    if (snapshotItems.length > 0 && rows.length > 0) {
+        const snapByProductId = new Map()
+        for (const snap of snapshotItems) {
+            const pid = String(snap?.productId || '').trim()
+            if (!pid) continue
+            if (!snapByProductId.has(pid)) snapByProductId.set(pid, [])
+            snapByProductId.get(pid).push(snap)
+        }
+        const usedCountByPid = new Map()
+        rows = rows.map(row => {
+            if (String(row.nameNumber || '').trim()) return row
+            const pid = String(row.productId || '').trim()
+            if (!pid) return row
+            const snaps = snapByProductId.get(pid) || []
+            const usedCount = usedCountByPid.get(pid) || 0
+            const snap = snaps[usedCount]
+            if (!snap) return row
+            usedCountByPid.set(pid, usedCount + 1)
+            const nameNum = combineLegacyNameAndNumber(snap?.name, snap?.number)
+            const lastName = String(snap?.playerLastName || '').trim()
+            if (!nameNum && !lastName) return row
+            return {
+                ...row,
+                nameNumber: nameNum || row.nameNumber,
+                playerLastName: lastName || row.playerLastName,
+                hasNameNumberField: !!nameNum || row.hasNameNumberField,
+                hasPlayerLastNameField: !!lastName || row.hasPlayerLastNameField,
+                originalNameNumber: row.originalNameNumber || nameNum,
+                originalPlayerLastName: row.originalPlayerLastName || lastName
+            }
+        })
+    }
 
     return Promise.all(rows.map(async row => {
         const optionSets = await getProductOptionSets(row.productId, row)
@@ -673,7 +711,7 @@ function toUserFacingStatus(status) {
 async function orderToUiState(order, { isAdminMode = false, bypassTimeWindow = false } = {}) {
     const firstName = order?.recipientInfo?.contactDetails?.firstName || ''
     const lastName = order?.recipientInfo?.contactDetails?.lastName || ''
-    const items = await buildUiItems(order?.lineItems || [], order?.newLineItems || [])
+    const items = await buildUiItems(order?.lineItems || [], order?.newLineItems || [], order?.lineItemsSnapshot || [])
     const messaging = getMessagingPermissions(order, { isAdminMode })
 
     return {
@@ -704,20 +742,10 @@ async function orderToUiState(order, { isAdminMode = false, bypassTimeWindow = f
 }
 
 async function pushCurrentState() {
-    if (!currentOrder) {
-        log('pushCurrentState skipped — no currentOrder')
-        return
-    }
+    if (!currentOrder) return
     const state = await orderToUiState(currentOrder, {
         isAdminMode: currentIsAdminMode,
         bypassTimeWindow: currentBypassTimeWindow
-    })
-    log('pushCurrentState', {
-        orderNumber: state.order?.number,
-        status: state.order?.status,
-        itemCount: state.items?.length,
-        editingAllowed: state.permissions?.editingAllowed,
-        isAdminMode: state.permissions?.isAdminMode
     })
     postToUi({
         type: 'TW_SET_STATE',
@@ -726,18 +754,11 @@ async function pushCurrentState() {
 }
 
 async function handleAdminMode() {
-    log('handleAdminMode start', { orderId: currentOrderId, loggedIn: authentication.loggedIn() })
-
     const isLoggedIn = authentication.loggedIn()
 
     if (!isLoggedIn) {
         try {
-            log('awaiting admin login prompt')
-            await authentication.promptLogin({
-                mode: 'login',
-                modal: true
-            })
-            log('admin login prompt resolved', { loggedIn: authentication.loggedIn() })
+            await authentication.promptLogin({ mode: 'login', modal: true })
         } catch (error) {
             console.error(LOG_NS, 'Admin login cancelled or failed:', error)
             return
@@ -745,15 +766,8 @@ async function handleAdminMode() {
     }
 
     const roleCheck = await checkMemberRoles()
-    log('checkMemberRoles', {
-        ok: roleCheck?.ok,
-        isAdmin: roleCheck?.isAdmin,
-        isContributor: roleCheck?.isContributor,
-        isOwner: roleCheck?.isOwner
-    })
 
     if (!roleCheck?.ok || (!roleCheck.isAdmin && !roleCheck.isContributor && !roleCheck.isOwner)) {
-        log('admin access denied — role check failed')
         postToUi({
             type: 'TW_AUTH_RESULT',
             ok: false,
@@ -763,8 +777,6 @@ async function handleAdminMode() {
     }
 
     const result = await getOrderForAdmin(currentOrderId)
-    log('getOrderForAdmin', { ok: result?.ok, hasOrder: !!result?.order })
-
     if (!result?.ok) {
         postToUi({
             type: 'TW_AUTH_RESULT',
@@ -775,7 +787,6 @@ async function handleAdminMode() {
     }
 
     currentOrder = result.order
-    log('admin order loaded', { number: currentOrder?.number, status: currentOrder?.orderStatus })
     await pushCurrentState()
 }
 
@@ -784,7 +795,6 @@ async function handleStoredAdminSession() {
     if (!session || !currentOrderId) return false
 
     const result = await getOrderForAdminCode(currentOrderId, session.accessCode)
-    log('handleStoredAdminSession', { ok: result?.ok, hasOrder: !!result?.order })
     if (!result?.ok) {
         clearAdminSession()
         return false
@@ -817,47 +827,27 @@ function buildUpdatePayload(changes) {
         changes: Array.isArray(change.changes) ? change.changes : [],
         lastChange: change.lastChange || null
     }))
-    log('buildUpdatePayload', {
-        rowCount: payload.length,
-        rowKeys: payload.map(p => p.rowKey).slice(0, 15)
-    })
     return payload
 }
 
 $w.onReady(function () {
     uiHtml = $w(UI_HTML_ID)
-    if (!uiHtml) {
-        log('onReady: HTML component not found —', UI_HTML_ID)
-        return
-    }
+    if (!uiHtml) return
 
     const path = norm(wixLocation.path)
     currentOrderId = path.length ? path[path.length - 1] : ''
     currentIsAdminMode = wixLocation.query.admin === 'true'
     currentBypassTimeWindow = currentIsAdminMode
 
-    log('onReady', {
-        iframeSrc: IFRAME_URL,
-        orderIdFromPath: currentOrderId,
-        adminQuery: currentIsAdminMode,
-        path
-    })
-
     uiHtml.src = IFRAME_URL
 
     uiHtml.onMessage(async event => {
         const data = event?.data || {}
-        if (!data?.type) {
-            log('← iframe message ignored (no type)', typeof event?.data)
-            return
-        }
-
-        log('← iframe', summarizeInboundData(data))
+        if (!data?.type) return
 
         if (data.type === 'TW_READY') {
             const hasStoredAdminSession = !currentIsAdminMode && !!readAdminSession()
             const effectiveAdminMode = currentIsAdminMode || hasStoredAdminSession
-            log('TW_READY: sending TW_INIT', { orderId: currentOrderId, isAdminMode: effectiveAdminMode })
             postToUi({
                 type: 'TW_INIT',
                 orderId: currentOrderId,
@@ -873,7 +863,6 @@ $w.onReady(function () {
         }
 
         if (data.type === 'TW_REQUEST_STATE') {
-            log('TW_REQUEST_STATE', { hasCurrentOrder: !!currentOrder })
             if (currentOrder) {
                 await pushCurrentState()
             } else {
@@ -891,11 +880,6 @@ $w.onReady(function () {
                 if ((data.mode || '').toString() === 'admin-code') {
                     const adminCode = (data.adminCode || '').toString().trim()
 
-                    log('TW_AUTH_SUBMIT: admin code mode', {
-                        orderId: currentOrderId,
-                        hasAdminCode: !!adminCode
-                    })
-
                     if (!currentOrderId || !adminCode) {
                         postToUi({
                             type: 'TW_AUTH_RESULT',
@@ -906,8 +890,6 @@ $w.onReady(function () {
                     }
 
                     const result = await getOrderForAdminCode(currentOrderId, adminCode)
-                    log('getOrderForAdminCode result', { ok: result?.ok, hasOrder: !!result?.order })
-
                     if (!result?.ok) {
                         postToUi({
                             type: 'TW_AUTH_RESULT',
@@ -931,14 +913,7 @@ $w.onReady(function () {
                 const email = (data.email || '').toString().trim()
                 const orderNumber = (data.orderNumber || '').toString().trim()
 
-                log('TW_AUTH_SUBMIT: validating', {
-                    orderId: currentOrderId,
-                    email: maskEmail(email),
-                    orderNumber: maskOrderRef(orderNumber)
-                })
-
                 if (!currentOrderId || !email || !orderNumber) {
-                    log('TW_AUTH_SUBMIT: rejected — missing orderId, email, or orderNumber')
                     postToUi({
                         type: 'TW_AUTH_RESULT',
                         ok: false,
@@ -948,10 +923,7 @@ $w.onReady(function () {
                 }
 
                 const result = await verifyOrderAndStatus(currentOrderId, email, orderNumber)
-                log('verifyOrderAndStatus result', { ok: result?.ok, hasOrder: !!result?.order })
-
                 if (!result?.ok) {
-                    log('TW_AUTH_SUBMIT: verify failed (ok=false)')
                     postToUi({
                         type: 'TW_AUTH_RESULT',
                         ok: false,
@@ -961,7 +933,6 @@ $w.onReady(function () {
                 }
 
                 currentOrder = result.order
-                log('TW_AUTH_SUBMIT: success', { orderNumber: currentOrder?.number, status: currentOrder?.orderStatus })
                 postToUi({ type: 'TW_AUTH_RESULT', ok: true })
                 await pushCurrentState()
             } catch (error) {
@@ -979,7 +950,6 @@ $w.onReady(function () {
             try {
                 const changes = Array.isArray(data.changes) ? data.changes : []
                 if (!currentOrderId) {
-                    log('TW_SAVE_SUBMIT: rejected — no orderId')
                     postToUi({
                         type: 'TW_SAVE_RESULT',
                         ok: false,
@@ -989,7 +959,6 @@ $w.onReady(function () {
                 }
 
                 if (!isEditingAllowed(currentOrder, { bypassTimeWindow: currentBypassTimeWindow })) {
-                    log('TW_SAVE_SUBMIT: rejected — edit window expired or editing not allowed')
                     postToUi({
                         type: 'TW_SAVE_RESULT',
                         ok: false,
@@ -1004,7 +973,6 @@ $w.onReady(function () {
                 }
 
                 if (!changes.length) {
-                    log('TW_SAVE_SUBMIT: rejected — empty changes')
                     postToUi({
                         type: 'TW_SAVE_RESULT',
                         ok: false,
@@ -1017,7 +985,6 @@ $w.onReady(function () {
                 const result = await updateOrderLineItems(currentOrderId, payload, {
                     bypassTimeWindow: currentBypassTimeWindow
                 })
-                log('updateOrderLineItems result', { ok: result?.ok, newStatus: result?.newStatus, message: result?.message })
 
                 if (!result?.ok) {
                     postToUi({
@@ -1052,7 +1019,6 @@ $w.onReady(function () {
                     locked: true,
                     reason: 'waiting for approval'
                 })
-                log('TW_SAVE_SUBMIT: completed — state updated + TW_LOCK_EDITING sent')
             } catch (error) {
                 console.error(LOG_NS, 'updateOrderLineItems failed:', error)
                 postToUi({

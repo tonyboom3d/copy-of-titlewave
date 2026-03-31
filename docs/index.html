@@ -68,6 +68,10 @@
 </head>
 <body class="bg-slate-50 text-slate-800 antialiased selection:bg-brand-100 selection:text-brand-900 overflow-hidden">
 
+    <div id="twVersionBadge" class="fixed bottom-2 left-2 z-[999] text-[11px] leading-none text-slate-400 bg-white/70 border border-slate-200 rounded-full px-2 py-1 backdrop-blur">
+        v—
+    </div>
+
     <!-- Auth / Verification Modal -->
     <div id="authModal" class="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm transition-opacity duration-500">
         <div class="bg-white w-full max-w-md p-8 shadow-2xl rounded-2xl relative mx-4 transform transition-transform duration-300">
@@ -91,11 +95,11 @@
             <div id="authCustomerFields" class="flex flex-col gap-4 mb-8">
                 <div class="flex flex-col gap-1.5">
                     <label class="text-slate-700 font-semibold text-sm">Order Number <span class="text-red-500">*</span></label>
-                    <input type="text" id="authOrderNumber" placeholder="10458" class="w-full px-4 py-3 text-slate-800 bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 rounded-xl transition-all shadow-sm">
+                    <input type="text" id="authOrderNumber" placeholder="e.g. 10011" class="w-full px-4 py-3 text-slate-800 bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 rounded-xl transition-all shadow-sm">
                 </div>
                 <div class="flex flex-col gap-1.5">
                     <label class="text-slate-700 font-semibold text-sm">Email Address <span class="text-red-500">*</span></label>
-                    <input type="email" id="authEmail" placeholder="example@email.com" class="w-full px-4 py-3 text-slate-800 bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 rounded-xl transition-all shadow-sm">
+                    <input type="email" id="authEmail" placeholder="e.g. test@gg.com" class="w-full px-4 py-3 text-slate-800 bg-slate-50 border border-slate-200 focus:bg-white focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 rounded-xl transition-all shadow-sm">
                 </div>
             </div>
 
@@ -161,6 +165,18 @@
                         <p id="statusBannerMessage" class="text-sm leading-relaxed mt-1"></p>
                     </div>
                 </div>
+            </div>
+        </section>
+
+        <section id="adminSessionBar" class="hidden">
+            <div class="bg-slate-900 text-white rounded-2xl px-5 py-4 flex items-center justify-between gap-4 shadow-sm">
+                <div class="min-w-0">
+                    <p class="text-xs font-semibold uppercase tracking-[0.18em] text-white/70">Admin Session</p>
+                    <p class="text-sm md:text-base text-white/90 mt-1">You are signed in as customer service on this device.</p>
+                </div>
+                <button id="adminLogoutBtn" class="shrink-0 px-4 py-2 rounded-xl bg-white text-slate-900 font-extrabold hover:bg-slate-100 transition-colors">
+                    Logout As Admin
+                </button>
             </div>
         </section>
 
@@ -413,7 +429,7 @@
                         <h4 id="modalTitle" class="text-slate-800 font-medium text-lg leading-tight">Soflo Hockey Jersey - Black</h4>
                         
                         <!-- Size Dropdown -->
-                        <div class="flex flex-col gap-1.5 relative">
+                        <div id="modalSizeGroup" class="flex flex-col gap-1.5 relative">
                             <label class="text-sm text-slate-600 font-medium">Size</label>
                             <div class="relative">
                                 <select id="modalSize" class="w-full border border-slate-300 rounded-md px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 appearance-none bg-white cursor-pointer shadow-sm">
@@ -441,10 +457,19 @@
                             </div>
                         </div>
 
+                        <div id="modalOptionsNotice" class="hidden rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+                            There are no selectable options to change for this item.
+                        </div>
+
                         <!-- Name & Number Input -->
-                        <div class="flex flex-col gap-1.5">
+                        <div id="modalNameNumberGroupWrap" class="flex flex-col gap-1.5">
                             <label class="text-sm text-slate-600 font-medium">Name and Number</label>
                             <input type="text" id="modalNameNumber" class="w-full border border-slate-300 rounded-md px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 shadow-sm" value="Test 28">
+                        </div>
+
+                        <div id="modalPlayerLastNameGroup" class="hidden flex flex-col gap-1.5">
+                            <label class="text-sm text-slate-600 font-medium">Player Last Name</label>
+                            <input type="text" id="modalPlayerLastName" class="w-full border border-slate-300 rounded-md px-3 py-2 text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500 shadow-sm" value="">
                         </div>
 
                         <div id="modalChangesPanel" class="hidden rounded-xl border border-amber-200 bg-amber-50/80 p-4 md:p-5">
@@ -487,11 +512,11 @@
 
                 <!-- Success State -->
                 <div id="successState" class="hidden flex flex-col items-center justify-center py-4">
-                    <div class="w-14 h-14 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-4">
-                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
+                    <div id="statusResultIconWrap" class="w-14 h-14 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-4">
+                        <svg class="w-8 h-8" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path id="statusResultIconPath" stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"></path></svg>
                     </div>
-                    <h3 class="text-xl font-bold text-slate-800 mb-2">Thank You!</h3>
-                    <p class="text-slate-600 text-sm leading-relaxed mb-6">
+                    <h3 id="statusResultTitle" class="text-xl font-bold text-slate-800 mb-2">Thank You!</h3>
+                    <p id="statusResultMessage" class="text-slate-600 text-sm leading-relaxed mb-6">
                         The information was saved successfully and transferred to customer service for further processing.
                     </p>
                     <button id="closeStatusModalBtn" class="w-full py-2.5 bg-slate-900 text-white font-medium rounded-lg hover:bg-slate-800 transition-colors">Close</button>
@@ -532,11 +557,13 @@
             AUTH_RESULT: 'TW_AUTH_RESULT',
             SAVE_SUBMIT: 'TW_SAVE_SUBMIT',
             SAVE_RESULT: 'TW_SAVE_RESULT',
-            LOCK_EDITING: 'TW_LOCK_EDITING'
+            LOCK_EDITING: 'TW_LOCK_EDITING',
+            ADMIN_LOGOUT: 'TW_ADMIN_LOGOUT',
+            ADMIN_LOGOUT_RESULT: 'TW_ADMIN_LOGOUT_RESULT'
         }
 
         const LOG_NS = '[TW iframe UI]'
-
+        const UI_VERSION = '2026-03-31.2'
         function log(...args) {
             console.log(LOG_NS, ...args)
         }
@@ -549,6 +576,61 @@
             return `${s.slice(0, 2)}...@${s.slice(at + 1)}`
         }
 
+        // Version badge (helps verify GitHub Pages deploy)
+        try {
+            const badge = document.getElementById('twVersionBadge')
+            if (badge) badge.textContent = `v${UI_VERSION}`
+        } catch (e) {}
+
+        function readAdminSession() {
+            return null
+        }
+
+        function saveAdminSession(accessCode) {
+            return accessCode
+        }
+
+        function clearAdminSession() {
+            return true
+        }
+
+        function updateAdminSessionUi(isAdmin) {
+            if (adminSessionBar) adminSessionBar.classList.toggle('hidden', !isAdmin)
+        }
+
+        function startAdminAuthLoading() {
+            authSubmitBtn.setAttribute('disabled', 'true')
+            authSubmitBtn.classList.add('opacity-80', 'cursor-not-allowed')
+            authBtnText.classList.add('opacity-0')
+            authBtnSpinner.classList.remove('hidden')
+        }
+
+        function attemptStoredAdminLogin() {
+            return false
+        }
+
+        function promptRefreshAfterLogout() {
+            const shouldRefresh = window.confirm('The admin session was removed from this device. Refresh the page now?')
+            if (shouldRefresh) {
+                window.location.reload()
+            }
+        }
+
+        function buildAvatarDataUri(kind) {
+            const isAdmin = kind === 'admin'
+            const bg = isAdmin ? '#0f172a' : '#e2e8f0'
+            const fg = isAdmin ? '#ffffff' : '#334155'
+            const label = isAdmin ? 'CS' : 'U'
+            const sub = isAdmin ? 'support' : 'user'
+            const svg =
+                `<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">` +
+                `<rect width="64" height="64" rx="32" fill="${bg}"/>` +
+                `<text x="32" y="30" text-anchor="middle" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="${fg}">${label}</text>` +
+                `<text x="32" y="46" text-anchor="middle" font-family="Arial, sans-serif" font-size="8" fill="${fg}" opacity="0.85">${sub}</text>` +
+                `</svg>`
+            return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`
+        }
+
         let hostInit = { orderId: '', isAdminMode: false }
         let uiState = null
         let lockedEditing = false
@@ -557,6 +639,8 @@
         let bypassTimeWindow = false
         let authMode = 'customer'
         let postSaveSummaryVisible = false
+        let attemptedStoredAdminLogin = false
+        let awaitingStoredAdminLogin = false
         let draftByRowKey = new Map() // rowKey -> partial fields
         let baseItemsByRowKey = new Map()
         const messagesSection = document.getElementById('messagesSection')
@@ -564,10 +648,11 @@
         const messageInput = document.getElementById('messageInput')
         const messageSendBtn = document.getElementById('messageSendBtn')
         const messagesLockedHint = document.getElementById('messagesLockedHint')
+        const adminSessionBar = document.getElementById('adminSessionBar')
+        const adminLogoutBtn = document.getElementById('adminLogoutBtn')
 
         function postToHost(payload) {
             try {
-                log('-> host', payload?.type || '(no-type)', payload)
                 window.parent.postMessage(payload, '*')
             } catch (e) {
                 console.error(LOG_NS, 'postToHost failed:', e)
@@ -575,7 +660,6 @@
         }
 
         // announce ready
-        log('iframe booted; sending TW_READY')
         postToHost({ type: HOST_TYPES.READY })
 
         // --- Save Button & Checkbox Logic ---
@@ -599,9 +683,28 @@
             return String(status || '').trim()
         }
 
+        function formatStatusForDisplay(status) {
+            const normalized = normalizeStatus(status)
+            const lower = normalized.toLowerCase()
+            if (lower === 'pending' || lower === 'pending (24h)') return 'Open for edits'
+            return normalized
+        }
+
+        function getItemBadgeLabel(item, orderStatus = '') {
+            const statusLabel = formatStatusForDisplay(item?.status || '')
+            if (statusLabel && statusLabel !== 'Open for edits') return statusLabel
+            const orderStatusLabel = formatStatusForDisplay(orderStatus || '')
+            if (hasPersistedChanges(item) && orderStatusLabel && orderStatusLabel !== 'Open for edits') return orderStatusLabel
+            return isItemChanged(item) ? 'Changed' : ''
+        }
+
         function getStatusMeta(status) {
             const normalized = normalizeStatus(status)
             const lower = normalized.toLowerCase()
+
+            if (lower === 'open for edits' || lower === 'pending' || lower === 'pending (24h)') {
+                return null
+            }
 
             if (lower === 'waiting for approval') {
                 return {
@@ -643,7 +746,7 @@
         }
 
         function areDraftPatchesEqual(a, b) {
-            const keys = ['size', 'color', 'colorLabel', 'colorHex', 'image', 'nameNumber']
+            const keys = ['size', 'color', 'colorLabel', 'colorHex', 'image', 'nameNumber', 'playerLastName']
             return keys.every(key => String(a?.[key] ?? '') === String(b?.[key] ?? ''))
         }
 
@@ -662,7 +765,8 @@
                 (patch.colorLabel ?? baseItem.colorLabel ?? '') !== (baseItem.colorLabel ?? '') ||
                 (patch.colorHex ?? baseItem.colorHex ?? '') !== (baseItem.colorHex ?? '') ||
                 (patch.image ?? baseItem.image ?? '') !== (baseItem.image ?? '') ||
-                (patch.nameNumber ?? baseItem.nameNumber ?? '') !== (baseItem.nameNumber ?? '')
+                (patch.nameNumber ?? baseItem.nameNumber ?? '') !== (baseItem.nameNumber ?? '') ||
+                (patch.playerLastName ?? baseItem.playerLastName ?? '') !== (baseItem.playerLastName ?? '')
             )
         }
 
@@ -696,6 +800,7 @@
             if (!messagesSection || !messagesThread) return
             const msgs = Array.isArray(state?.order?.messages) ? state.order.messages : []
             const allowed = state?.permissions?.messagingAllowed !== false
+            const lockedHint = String(state?.permissions?.messagingHint || 'Messaging is locked for this order status.')
 
             messagesSection.classList.remove('hidden')
             messagesThread.innerHTML = ''
@@ -707,17 +812,25 @@
                 messagesThread.appendChild(p)
             } else {
                 msgs.forEach(m => {
-                    const name = String(m?.name || '')
+                    const role = String(m?.role || '').toLowerCase()
+                    const isAdminMessage = role === 'admin'
+                    const name = String(m?.displayName || m?.name || '')
                     const ts = String(m?.ts || '')
                     const text = String(m?.text || '')
-                    const role = String(m?.role || '').toLowerCase()
-                    const tone = role === 'admin' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'
+                    const tone = isAdminMessage ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-900'
+                    const displayName = isAdminMessage ? 'Customer Service' : (name || 'Customer')
+                    const avatarSrc = buildAvatarDataUri(isAdminMessage ? 'admin' : 'user')
 
                     const bubble = document.createElement('div')
                     bubble.className = `rounded-2xl p-4 ${tone}`
                     bubble.innerHTML = `
-                        <div class="text-xs opacity-80 font-semibold">${escapeHtml(name || 'User')} • ${escapeHtml(ts ? new Date(ts).toLocaleString() : '')}</div>
-                        <div class="mt-2 text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(text)}</div>
+                        <div class="flex items-start gap-3">
+                            <img src="${avatarSrc}" alt="${escapeHtml(displayName)}" class="w-10 h-10 rounded-full border border-white/20 shrink-0 object-cover">
+                            <div class="min-w-0 flex-1">
+                                <div class="text-xs opacity-80 font-semibold">${escapeHtml(displayName)} • ${escapeHtml(ts ? new Date(ts).toLocaleString() : '')}</div>
+                                <div class="mt-2 text-sm leading-relaxed whitespace-pre-wrap">${escapeHtml(text)}</div>
+                            </div>
+                        </div>
                     `
                     messagesThread.appendChild(bubble)
                 })
@@ -725,7 +838,10 @@
 
             if (messageInput) messageInput.disabled = !allowed
             if (messageSendBtn) messageSendBtn.disabled = !allowed
-            if (messagesLockedHint) messagesLockedHint.classList.toggle('hidden', !!allowed)
+            if (messagesLockedHint) {
+                messagesLockedHint.textContent = lockedHint
+                messagesLockedHint.classList.toggle('hidden', !!allowed)
+            }
         }
 
         messageSendBtn?.addEventListener('click', () => {
@@ -764,7 +880,7 @@
                 postSaveSummary.classList.remove('hidden')
                 postSaveSummary.classList.add('flex')
             }
-            if (statusEl) statusEl.textContent = normalizeStatus(statusText) || 'Waiting for Approval'
+            if (statusEl) statusEl.textContent = formatStatusForDisplay(statusText) || 'Waiting for Approval'
             postSaveSummaryVisible = true
         }
 
@@ -890,15 +1006,7 @@
             const contact = state?.contact || {}
             const shipping = state?.shipping || {}
             const permissions = state?.permissions || {}
-            const normalizedStatus = normalizeStatus(order?.status) || 'Pending'
-            log('setOrderMetaFromState', {
-                orderNumber: order?.number,
-                status: normalizedStatus,
-                itemCount: Array.isArray(state?.items) ? state.items.length : 0,
-                isAdminMode: !!permissions?.isAdminMode,
-                editingAllowed: permissions?.editingAllowed
-            })
-
+            const normalizedStatus = formatStatusForDisplay(order?.status) || 'Open for edits'
             const orderNumEl = document.getElementById('orderNumber')
             if (orderNumEl) orderNumEl.textContent = order?.number ? `#${order.number}` : '#—'
 
@@ -932,7 +1040,6 @@
             tbody.innerHTML = ''
 
             const items = Array.isArray(state?.items) ? state.items : []
-            log('renderItemsTable', { itemCount: items.length })
             items.forEach((it) => {
                 const mergedItem = buildMergedItem(it)
                 const row = document.createElement('tr')
@@ -945,12 +1052,13 @@
                 const color = mergedItem.colorLabel || mergedItem.color || ''
                 const colorHex = mergedItem.colorHex || ''
                 const nameNumber = mergedItem.nameNumber || ''
-                const dirty = isItemChanged(mergedItem)
+                const playerLastName = mergedItem.playerLastName || ''
+                const changeTag = getItemBadgeLabel(mergedItem, state?.order?.status || '')
 
                 row.innerHTML = `
                     <td class="py-3 px-6">
                         <div class="relative w-16 h-16 bg-slate-100 rounded mx-auto overflow-hidden border border-slate-200">
-                            ${dirty ? `<span class="absolute top-1 right-1 z-10 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">Changed</span>` : ''}
+                            ${changeTag ? `<span class="absolute top-1 right-1 z-10 bg-amber-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow-sm">${escapeHtml(changeTag)}</span>` : ''}
                             ${imgUrl ? `<img src="${imgUrl}" alt="" class="w-full h-full object-cover opacity-90" onerror="this.style.display='none'">` : ''}
                         </div>
                     </td>
@@ -962,11 +1070,15 @@
                             <span>${escapeHtml(color)}</span>
                         </div>
                     </td>
-                    <td class="py-4 px-6 text-slate-800 border-l border-slate-200">${escapeHtml(nameNumber)}</td>
+                    <td class="py-4 px-6 text-slate-800 border-l border-slate-200">
+                        <div class="flex flex-col items-center gap-1">
+                            <span>${escapeHtml(nameNumber || '—')}</span>
+                            ${playerLastName ? `<span class="text-xs text-slate-500">${escapeHtml(playerLastName)}</span>` : ''}
+                        </div>
+                    </td>
                 `
 
                 row.addEventListener('click', () => {
-                    log('row click', { rowKey: it.rowKey, lockedEditing, isAdminMode: hostInit.isAdminMode })
                     openEditModal(it)
                 })
 
@@ -1000,6 +1112,11 @@
         const modalColorSwatch = document.getElementById('modalColorSwatch');
         const modalNameNumber = document.getElementById('modalNameNumber');
         const modalNameNumberGroup = modalNameNumber.parentElement;
+        const modalNameNumberGroupWrap = document.getElementById('modalNameNumberGroupWrap');
+        const modalPlayerLastName = document.getElementById('modalPlayerLastName');
+        const modalPlayerLastNameGroup = document.getElementById('modalPlayerLastNameGroup');
+        const modalSizeGroup = document.getElementById('modalSizeGroup');
+        const modalOptionsNotice = document.getElementById('modalOptionsNotice');
         const modalChangesPanel = document.getElementById('modalChangesPanel');
         const modalChangesList = document.getElementById('modalChangesList');
         
@@ -1009,8 +1126,7 @@
         let originalColorHex = '';
         let originalImage = '';
         let originalNameNum = '';
-
-        const fallbackSizeOptions = ['Youth-XS', 'Youth-Small', 'Youth-Medium', 'Youth-Large', 'GC Y L/XL', 'Adult-S', 'Adult-M', 'Adult-L', 'Adult-XL'];
+        let originalPlayerLastName = '';
 
         function makeDiffRow(label, fromValue, toValue, { fromSwatch = '', toSwatch = '' } = {}) {
             const row = document.createElement('div')
@@ -1051,11 +1167,13 @@
             const originalColorValue = item?.originalColorLabel || item?.originalColor || ''
             const originalColorSwatch = item?.originalColorHex || ''
             const originalNameNumberValue = item?.originalNameNumber || ''
+            const originalPlayerLastNameValue = item?.originalPlayerLastName || ''
 
             const currentSizeValue = mergedItem?.size || ''
             const currentColorValue = mergedItem?.colorLabel || mergedItem?.color || ''
             const currentColorSwatch = mergedItem?.colorHex || ''
             const currentNameNumberValue = mergedItem?.nameNumber || ''
+            const currentPlayerLastNameValue = mergedItem?.playerLastName || ''
 
             const entries = []
 
@@ -1077,6 +1195,10 @@
                 entries.push(makeDiffRow('Name / Number', originalNameNumberValue, currentNameNumberValue))
             }
 
+            if (String(originalPlayerLastNameValue) !== String(currentPlayerLastNameValue)) {
+                entries.push(makeDiffRow('Player Last Name', originalPlayerLastNameValue, currentPlayerLastNameValue))
+            }
+
             modalChangesList.innerHTML = ''
             if (!entries.length) {
                 modalChangesPanel.classList.add('hidden')
@@ -1091,6 +1213,7 @@
             modalSize.disabled = readOnly
             modalColor.disabled = readOnly
             modalNameNumber.disabled = readOnly
+            if (modalPlayerLastName) modalPlayerLastName.disabled = readOnly
             resetModalBtn.classList.toggle('hidden', readOnly)
             saveModalBtn.textContent = readOnly ? 'Close' : 'Save'
             saveModalBtn.classList.toggle('bg-brand-600', !readOnly)
@@ -1103,10 +1226,31 @@
 
         function ensureOption(options, value, label = value) {
             const normalizedValue = String(value || '')
+            const normalizedLabel = String(label || '')
             if (!normalizedValue) return options
-            const exists = options.some(option => String(option?.value || '').toLowerCase() === normalizedValue.toLowerCase())
+            const exists = options.some(option => {
+                const optionValue = String(option?.value || '').toLowerCase()
+                const optionLabel = String(option?.label || option?.value || '').toLowerCase()
+                return (
+                    optionValue === normalizedValue.toLowerCase() ||
+                    optionLabel === normalizedValue.toLowerCase() ||
+                    (!!normalizedLabel && optionLabel === normalizedLabel.toLowerCase())
+                )
+            })
             if (exists) return options
             return [{ value: normalizedValue, label: label || normalizedValue }, ...options]
+        }
+
+        function dedupeOptions(options, keyBuilder = option => `${option?.value || ''}::${option?.label || ''}::${option?.color || ''}`) {
+            const seen = new Set()
+            const out = []
+            ;(options || []).forEach(option => {
+                const key = keyBuilder(option)
+                if (!key || seen.has(key)) return
+                seen.add(key)
+                out.push(option)
+            })
+            return out
         }
 
         function findColorOption(options, value, label = '') {
@@ -1137,9 +1281,12 @@
         function populateSizeDropdown(item) {
             modalSize.innerHTML = ''
 
-            const actualOptions = Array.isArray(item?.optionSets?.sizes) ? item.optionSets.sizes : []
-            const fallbackOptions = fallbackSizeOptions.map(value => ({ value, label: value }))
-            const merged = ensureOption(actualOptions.length ? actualOptions : fallbackOptions, item.size, item.size)
+            const actualOptions = item?.optionSets?.hasSizeOptions
+                ? (Array.isArray(item?.optionSets?.sizes) ? item.optionSets.sizes : [])
+                : []
+            const merged = dedupeOptions(ensureOption(actualOptions, item.size, item.size), option => `${option?.value || ''}::${option?.label || ''}`)
+            if (modalSizeGroup) modalSizeGroup.classList.toggle('hidden', !merged.length)
+            if (!merged.length) return
 
             merged.forEach(optionData => {
                 if (!optionData?.value) return
@@ -1149,12 +1296,14 @@
                 modalSize.appendChild(option)
             })
 
-            modalSize.value = item.size || ''
+            modalSize.value = item.size || merged[0]?.value || ''
         }
 
         function populateColorDropdown(item) {
-            const actualColors = Array.isArray(item?.optionSets?.colors) ? item.optionSets.colors : []
-            const merged = ensureOption(actualColors, item.color, item.colorLabel || item.color)
+            const actualColors = item?.optionSets?.hasColorOptions
+                ? (Array.isArray(item?.optionSets?.colors) ? item.optionSets.colors : [])
+                : []
+            const merged = dedupeOptions(ensureOption(actualColors, item.color, item.colorLabel || item.color))
 
             if (!merged.length || !merged[0]?.value) {
                 modalColorGroup.classList.add('hidden')
@@ -1185,7 +1334,20 @@
         }
 
         function openEditModal(item) {
-            log('openEditModal', { rowKey: item?.rowKey, productName: item?.productName })
+            log('openEditModal', {
+                rowKey: item?.rowKey,
+                productName: item?.productName,
+                nameNumber: item?.nameNumber || '(empty)',
+                hasNameNumberField: item?.hasNameNumberField,
+                playerLastName: item?.playerLastName || '(empty)',
+                hasPlayerLastNameField: item?.hasPlayerLastNameField,
+                color: item?.color,
+                colorLabel: item?.colorLabel,
+                colorHex: item?.colorHex || '(no hex)',
+                colors: (item?.optionSets?.colors || []).map(c => `${c.value}::${c.label}::${c.color || ''}`),
+                hasSizeOptions: item?.optionSets?.hasSizeOptions,
+                hasColorOptions: item?.optionSets?.hasColorOptions
+            })
             const mergedItem = buildMergedItem(item)
             currentRow = item
             originalSize = mergedItem.size || ''
@@ -1193,6 +1355,7 @@
             originalColorHex = mergedItem.colorHex || ''
             originalImage = mergedItem.image || ''
             originalNameNum = mergedItem.nameNumber || ''
+            originalPlayerLastName = mergedItem.playerLastName || ''
 
             modalTitle.textContent = mergedItem.productName || ''
             modalImg.src = mergedItem.image || ''
@@ -1201,14 +1364,21 @@
             populateSizeDropdown(mergedItem)
             populateColorDropdown(mergedItem)
             modalNameNumber.value = mergedItem.nameNumber || ''
+            if (modalPlayerLastName) modalPlayerLastName.value = mergedItem.playerLastName || ''
             renderModalChanges(item, mergedItem)
             applyModalReadOnlyState(lockedEditing)
 
-            if ((item.nameNumber || '').toString().trim()) {
-                modalNameNumberGroup.classList.remove('hidden')
-            } else {
-                modalNameNumberGroup.classList.add('hidden')
+            if (modalNameNumberGroupWrap) {
+                const showNameNumber = !!item?.hasNameNumberField || !!(item.nameNumber || '').toString().trim()
+                modalNameNumberGroupWrap.classList.toggle('hidden', !showNameNumber)
             }
+            if (modalPlayerLastNameGroup) {
+                const showPlayerLastName = !!item?.hasPlayerLastNameField || !!(item.playerLastName || '').toString().trim()
+                modalPlayerLastNameGroup.classList.toggle('hidden', !showPlayerLastName)
+            }
+            const hasProductChoices =
+                !!mergedItem?.optionSets?.hasSizeOptions || !!mergedItem?.optionSets?.hasColorOptions
+            if (modalOptionsNotice) modalOptionsNotice.classList.toggle('hidden', hasProductChoices)
 
             editModal.classList.remove('hidden')
             void editModal.offsetWidth
@@ -1238,6 +1408,7 @@
                 modalImg.src = originalImage || '';
             }
             modalNameNumber.value = originalNameNum;
+            if (modalPlayerLastName) modalPlayerLastName.value = originalPlayerLastName;
         });
 
         modalColor.addEventListener('change', () => {
@@ -1284,15 +1455,46 @@
                         : (currentRow.image || ''),
                     nameNumber: modalNameNumberGroup.classList.contains('hidden')
                         ? (currentRow.nameNumber || '')
-                        : (modalNameNumber.value || '').trim()
+                        : (modalNameNumber.value || '').trim(),
+                    playerLastName: modalPlayerLastNameGroup && !modalPlayerLastNameGroup.classList.contains('hidden')
+                        ? ((modalPlayerLastName?.value || '').trim())
+                        : (currentRow.playerLastName || '')
                 }
                 const baseItem = getBaseItem(rowKey) || currentRow
                 const patch = {}
-                ;['size', 'color', 'colorLabel', 'colorHex', 'image', 'nameNumber'].forEach(key => {
+                ;['size', 'color', 'colorLabel', 'colorHex', 'image', 'nameNumber', 'playerLastName'].forEach(key => {
                     if ((nextValues[key] || '') !== (baseItem?.[key] || '')) {
                         patch[key] = nextValues[key]
                     }
                 })
+
+                const changeList = []
+                if (String(nextValues.size || '') !== String(baseItem?.size || '')) {
+                    changeList.push({ key: 'size', label: 'Size', from: baseItem?.size || '', to: nextValues.size || '' })
+                }
+                if (
+                    String(nextValues.colorLabel || nextValues.color || '') !== String(baseItem?.colorLabel || baseItem?.color || '') ||
+                    String(nextValues.colorHex || '') !== String(baseItem?.colorHex || '')
+                ) {
+                    changeList.push({
+                        key: 'color',
+                        label: 'Color',
+                        from: baseItem?.colorLabel || baseItem?.color || '',
+                        to: nextValues.colorLabel || nextValues.color || '',
+                        fromSwatch: baseItem?.colorHex || '',
+                        toSwatch: nextValues.colorHex || ''
+                    })
+                }
+                if (String(nextValues.nameNumber || '') !== String(baseItem?.nameNumber || '')) {
+                    changeList.push({ key: 'nameNumber', label: 'Name/Number', from: baseItem?.nameNumber || '', to: nextValues.nameNumber || '' })
+                }
+                if (String(nextValues.playerLastName || '') !== String(baseItem?.playerLastName || '')) {
+                    changeList.push({ key: 'playerLastName', label: 'Last Name', from: baseItem?.playerLastName || '', to: nextValues.playerLastName || '' })
+                }
+                if (changeList.length) {
+                    patch.changes = changeList
+                    patch.lastChange = changeList[changeList.length - 1]
+                }
 
                 const nextPatch = Object.keys(patch).length ? patch : null
                 const didDraftStateChange =
@@ -1300,12 +1502,6 @@
                         ? !areDraftPatchesEqual(previousPatch, nextPatch)
                         : !!previousPatch
 
-                log('modal save clicked', {
-                    rowKey,
-                    patch,
-                    changedKeys: Object.keys(patch),
-                    didDraftStateChange
-                })
                 if (nextPatch) {
                     draftByRowKey.set(rowKey, nextPatch)
                 } else {
@@ -1334,6 +1530,10 @@
         const statusModalContent = document.getElementById('statusModalContent');
         const loadingState = document.getElementById('loadingState');
         const successState = document.getElementById('successState');
+        const statusResultIconWrap = document.getElementById('statusResultIconWrap');
+        const statusResultIconPath = document.getElementById('statusResultIconPath');
+        const statusResultTitle = document.getElementById('statusResultTitle');
+        const statusResultMessage = document.getElementById('statusResultMessage');
         const closeStatusModalBtn = document.getElementById('closeStatusModalBtn');
         const confirmModal = document.getElementById('confirmModal')
         const confirmModalContent = document.getElementById('confirmModalContent')
@@ -1344,7 +1544,7 @@
         let pendingSavePayload = null
         let adminDecisionByRowKey = new Map() // rowKey -> status
 
-        const ADMIN_STATUSES = ['Pending (24h)', 'Approved', 'Waiting for Approval', 'Rejected', 'Canceled', 'Sent to Production']
+        const ADMIN_STATUSES = ['Approved', 'Waiting for Approval', 'Rejected', 'Canceled']
         const adminRequestsSection = document.getElementById('adminRequestsSection')
         const adminRequestsList = document.getElementById('adminRequestsList')
         const adminRequestsEmpty = document.getElementById('adminRequestsEmpty')
@@ -1359,6 +1559,22 @@
                 .replace(/>/g, '&gt;')
                 .replace(/"/g, '&quot;')
                 .replace(/'/g, '&#039;')
+        }
+
+        function setStatusResultState({ ok, message = '' }) {
+            if (!statusResultIconWrap || !statusResultIconPath || !statusResultTitle || !statusResultMessage) return
+            if (ok) {
+                statusResultIconWrap.className = 'w-14 h-14 bg-green-100 text-green-500 rounded-full flex items-center justify-center mb-4'
+                statusResultIconPath.setAttribute('d', 'M5 13l4 4L19 7')
+                statusResultTitle.textContent = 'Thank You!'
+                statusResultMessage.textContent = message || 'The information was saved successfully and transferred to customer service for further processing.'
+                return
+            }
+
+            statusResultIconWrap.className = 'w-14 h-14 bg-red-100 text-red-500 rounded-full flex items-center justify-center mb-4'
+            statusResultIconPath.setAttribute('d', 'M6 18L18 6M6 6l12 12')
+            statusResultTitle.textContent = 'Could not save changes'
+            statusResultMessage.textContent = message || 'We could not save your changes. Please try again.'
         }
 
         function showConfirmModal(changes, itemsByRowKey) {
@@ -1377,6 +1593,7 @@
                 addLine('Size', base.size || '', ch.size || '')
                 addLine('Color', base.colorLabel || base.color || '', ch.colorLabel || ch.color || '')
                 addLine('Name/Number', base.nameNumber || '', ch.nameNumber || '')
+                addLine('Last Name', base.playerLastName || '', ch.playerLastName || '')
 
                 const title = (ch.productName || base.productName || 'Item').toString()
                 const badge = (base.rowKey || ch.rowKey || '').toString()
@@ -1498,7 +1715,7 @@
                         <div class="shrink-0 flex flex-col gap-2 items-end">
                             <label class="text-xs font-semibold text-slate-500 uppercase tracking-[0.14em]">Decision</label>
                             <select data-rowkey="${escapeHtml(rowKey)}" class="adminDecisionSelect w-[230px] border border-slate-200 rounded-xl px-3 py-2 text-slate-900 font-semibold bg-white focus:outline-none focus:ring-2 focus:ring-brand-500">
-                                ${ADMIN_STATUSES.map(s => `<option value="${escapeHtml(s)}"${s===current?' selected':''}>${escapeHtml(s)}</option>`).join('')}
+                                ${ADMIN_STATUSES.map(s => `<option value="${escapeHtml(s)}"${s===current?' selected':''}>${escapeHtml(formatStatusForDisplay(s))}</option>`).join('')}
                             </select>
                         </div>
                     </div>
@@ -1530,6 +1747,10 @@
             const on = item?.originalNameNumber || ''
             const nn = item?.nameNumber || ''
             if (String(on) !== String(nn)) parts.push(`Name/Number: ${escapeHtml(on || '—')} → ${escapeHtml(nn || '—')}`)
+
+            const ol = item?.originalPlayerLastName || ''
+            const nl = item?.playerLastName || ''
+            if (String(ol) !== String(nl)) parts.push(`Last Name: ${escapeHtml(ol || '—')} → ${escapeHtml(nl || '—')}`)
 
             return parts.length ? parts.join(' • ') : 'Changes detected'
         }
@@ -1568,7 +1789,7 @@
                     wrap.innerHTML = `
                         <div class="font-extrabold text-slate-900">${escapeHtml(d.productName || 'Item')}</div>
                         <div class="text-xs text-slate-500 mt-1">Row: ${escapeHtml(d.rowKey || '—')}</div>
-                        <div class="text-sm text-slate-700 mt-3"><span class="text-slate-400">Decision:</span> <span class="font-extrabold">${escapeHtml(d.status || '')}</span></div>
+                        <div class="text-sm text-slate-700 mt-3"><span class="text-slate-400">Decision:</span> <span class="font-extrabold">${escapeHtml(formatStatusForDisplay(d.status || ''))}</span></div>
                     `
                     confirmList.appendChild(wrap)
                 })
@@ -1582,12 +1803,6 @@
         })
 
         saveButton.addEventListener('click', () => {
-            log('save button clicked', {
-                disabled: saveButton.hasAttribute('disabled'),
-                lockedEditing,
-                isAdminMode: hostInit.isAdminMode,
-                hasState: !!uiState
-            })
             if (saveButton.hasAttribute('disabled')) return
             if (lockedEditing) return
             if (!uiState || !Array.isArray(uiState.items)) return
@@ -1607,7 +1822,12 @@
                     colorLabel: ('colorLabel' in patch) ? patch.colorLabel : ((it.colorLabel || it.color || '')),
                     colorHex: ('colorHex' in patch) ? patch.colorHex : (it.colorHex || ''),
                     nameNumber: ('nameNumber' in patch) ? patch.nameNumber : (it.nameNumber || ''),
-                    image: ('image' in patch) ? patch.image : (it.image || '')
+                    playerLastName: ('playerLastName' in patch) ? patch.playerLastName : (it.playerLastName || ''),
+                    image: ('image' in patch) ? patch.image : (it.image || ''),
+                    hasNameNumberField: !!it.hasNameNumberField,
+                    hasPlayerLastNameField: !!it.hasPlayerLastNameField,
+                    changes: Array.isArray(patch.changes) ? patch.changes : (Array.isArray(it.changes) ? it.changes : []),
+                    lastChange: patch.lastChange || it.lastChange || null
                 })
             }
 
@@ -1696,9 +1916,12 @@
 
         adminLoginToggleBtn.addEventListener('click', () => setAuthMode('admin-code'))
         customerLoginToggleBtn.addEventListener('click', () => setAuthMode('customer'))
+        adminLogoutBtn?.addEventListener('click', () => {
+            clearAdminSession()
+            postToHost({ type: HOST_TYPES.ADMIN_LOGOUT })
+        })
 
         authSubmitBtn.addEventListener('click', () => {
-            log('verify button clicked')
             if (authSubmitBtn.hasAttribute('disabled')) return;
 
             authErrorMsg.classList.add('hidden');
@@ -1708,34 +1931,19 @@
 
             if (authMode === 'admin-code') {
                 const adminCodeVal = authAdminCode.value.trim();
-                log('admin auth form values', {
-                    hasAdminCode: !!adminCodeVal,
-                    hostOrderId: hostInit.orderId
-                })
 
                 if (adminCodeVal === '') {
                     authAdminCode.classList.add('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
                     return;
                 }
 
-                authSubmitBtn.setAttribute('disabled', 'true');
-                authSubmitBtn.classList.add('opacity-80', 'cursor-not-allowed');
-                authBtnText.classList.add('opacity-0');
-                authBtnSpinner.classList.remove('hidden');
-
-                log('sending TW_AUTH_SUBMIT admin-code')
+                startAdminAuthLoading()
                 postToHost({ type: HOST_TYPES.AUTH_SUBMIT, mode: 'admin-code', adminCode: adminCodeVal })
                 return
             }
 
             const orderVal = authOrderNumber.value.trim();
             const emailVal = authEmail.value.trim();
-            log('auth form values', {
-                orderNumberLength: orderVal.length,
-                email: maskEmail(emailVal),
-                hostOrderId: hostInit.orderId,
-                isAdminMode: hostInit.isAdminMode
-            })
             // Basic validation for empty fields
             let hasError = false;
             if(orderVal === '') {
@@ -1755,7 +1963,6 @@
             authBtnText.classList.add('opacity-0');
             authBtnSpinner.classList.remove('hidden');
 
-            log('sending TW_AUTH_SUBMIT')
             postToHost({ type: HOST_TYPES.AUTH_SUBMIT, email: emailVal, orderNumber: orderVal })
         });
 
@@ -1779,22 +1986,23 @@
         window.addEventListener('message', (ev) => {
             const d = ev?.data || {}
             if (!d || typeof d !== 'object') return
-            log('<- host', d.type || '(no-type)', d)
 
             if (d.type === HOST_TYPES.INIT) {
                 hostInit = { orderId: d.orderId || '', isAdminMode: !!d.isAdminMode }
-                log('received TW_INIT', hostInit)
                 // admin mode: no auth modal
                 if (hostInit.isAdminMode) {
                     authModal.classList.add('hidden')
                     document.body.classList.remove('overflow-hidden')
+                    updateAdminSessionUi(true)
+                } else {
+                    updateAdminSessionUi(false)
+                    attemptStoredAdminLogin()
                 }
                 syncEditingLockState()
                 return
             }
 
             if (d.type === HOST_TYPES.SET_STATE) {
-                log('received TW_SET_STATE')
                 uiState = d.state || null
                 baseItemsByRowKey = new Map((uiState?.items || []).map(item => [item.rowKey, { ...item }]))
                 if (uiState) {
@@ -1806,6 +2014,7 @@
                 }
                 renderAdminRequests(uiState)
                 renderMessages(uiState)
+                updateAdminSessionUi(!!uiState?.permissions?.isAdminMode)
                 refreshSaveButtonState()
 
                 // hide auth if we now have order number
@@ -1820,9 +2029,12 @@
             }
 
             if (d.type === HOST_TYPES.AUTH_RESULT) {
-                log('received TW_AUTH_RESULT', { ok: !!d.ok, message: d.message || '' })
                 finishAuthLoadingWithDelay(() => {
                     if (!d.ok) {
+                        if (awaitingStoredAdminLogin) {
+                            clearAdminSession()
+                            awaitingStoredAdminLogin = false
+                        }
                         if (authErrorText && d.message) authErrorText.textContent = String(d.message)
                         authErrorMsg.classList.remove('hidden')
                         if (authMode === 'admin-code') {
@@ -1831,30 +2043,36 @@
                             authOrderNumber.classList.add('border-red-500')
                             authEmail.classList.add('border-red-500')
                         }
+                    } else if (authMode === 'admin-code') {
+                        saveAdminSession(authAdminCode.value || '')
+                        awaitingStoredAdminLogin = false
+                        updateAdminSessionUi(true)
                     }
                 })
                 return
             }
 
             if (d.type === HOST_TYPES.SAVE_RESULT) {
-                log('received TW_SAVE_RESULT', { ok: !!d.ok, message: d.message || '', newStatus: d.newStatus || '' })
                 if (d.ok) {
-                    hideStatusModal()
                     draftByRowKey = new Map()
-                    showPostSaveSummary(d.newStatus || 'Waiting for Approval')
                     refreshSaveButtonState()
+                    if (uiState?.permissions?.isAdminMode) {
+                        loadingState.classList.add('hidden')
+                        setStatusResultState({ ok: true, message: 'Admin decisions were saved successfully.' })
+                        successState.classList.remove('hidden')
+                    } else {
+                        hideStatusModal()
+                        showPostSaveSummary(d.newStatus || 'Waiting for Approval')
+                    }
                 } else {
-                    // show failure as authError-style banner inside status modal (simple reuse)
+                    setStatusResultState({ ok: false, message: d.message ? String(d.message) : 'Failed to save changes.' })
                     loadingState.classList.add('hidden')
                     successState.classList.remove('hidden')
-                    const p = successState.querySelector('p')
-                    if (p) p.textContent = d.message ? String(d.message) : 'Failed to save changes.'
                 }
                 return
             }
 
             if (d.type === HOST_TYPES.LOCK_EDITING) {
-                log('received TW_LOCK_EDITING', { locked: !!d.locked, reason: d.reason || '' })
                 lockedByHost = !!d.locked
                 syncEditingLockState()
                 return
@@ -1862,15 +2080,30 @@
 
             if (d.type === 'TW_MESSAGE_RESULT') {
                 if (!d.ok) {
-                    log('message send failed', { message: d.message || '' })
+                    if (messagesLockedHint) {
+                        messagesLockedHint.textContent = String(d.message || 'Failed to send message.')
+                        messagesLockedHint.classList.remove('hidden')
+                    }
                 }
+                return
+            }
+
+            if (d.type === HOST_TYPES.ADMIN_LOGOUT_RESULT) {
+                clearAdminSession()
+                updateAdminSessionUi(false)
+                uiState = null
+                draftByRowKey = new Map()
+                baseItemsByRowKey = new Map()
+                setAuthMode('customer')
+                authModal.classList.remove('hidden')
+                document.body.classList.add('overflow-hidden')
+                promptRefreshAfterLogout()
                 return
             }
         })
 
         // In case the host missed our initial ready, ask for state soon
         setTimeout(() => {
-            log('sending TW_REQUEST_STATE fallback')
             postToHost({ type: HOST_TYPES.REQUEST_STATE })
         }, 300)
 

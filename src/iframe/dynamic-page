@@ -563,7 +563,7 @@
         }
 
         const LOG_NS = '[TW iframe UI]'
-        const UI_VERSION = '2026-03-31.1'
+        const UI_VERSION = '2026-03-31.2'
         function log(...args) {
             console.log(LOG_NS, ...args)
         }
@@ -653,7 +653,6 @@
 
         function postToHost(payload) {
             try {
-                log('-> host', payload?.type || '(no-type)', payload)
                 window.parent.postMessage(payload, '*')
             } catch (e) {
                 console.error(LOG_NS, 'postToHost failed:', e)
@@ -661,7 +660,6 @@
         }
 
         // announce ready
-        log('iframe booted; sending TW_READY')
         postToHost({ type: HOST_TYPES.READY })
 
         // --- Save Button & Checkbox Logic ---
@@ -1009,14 +1007,6 @@
             const shipping = state?.shipping || {}
             const permissions = state?.permissions || {}
             const normalizedStatus = formatStatusForDisplay(order?.status) || 'Open for edits'
-            log('setOrderMetaFromState', {
-                orderNumber: order?.number,
-                status: normalizedStatus,
-                itemCount: Array.isArray(state?.items) ? state.items.length : 0,
-                isAdminMode: !!permissions?.isAdminMode,
-                editingAllowed: permissions?.editingAllowed
-            })
-
             const orderNumEl = document.getElementById('orderNumber')
             if (orderNumEl) orderNumEl.textContent = order?.number ? `#${order.number}` : '#—'
 
@@ -1050,7 +1040,6 @@
             tbody.innerHTML = ''
 
             const items = Array.isArray(state?.items) ? state.items : []
-            log('renderItemsTable', { itemCount: items.length })
             items.forEach((it) => {
                 const mergedItem = buildMergedItem(it)
                 const row = document.createElement('tr')
@@ -1090,7 +1079,6 @@
                 `
 
                 row.addEventListener('click', () => {
-                    log('row click', { rowKey: it.rowKey, lockedEditing, isAdminMode: hostInit.isAdminMode })
                     openEditModal(it)
                 })
 
@@ -1346,7 +1334,20 @@
         }
 
         function openEditModal(item) {
-            log('openEditModal', { rowKey: item?.rowKey, productName: item?.productName })
+            log('openEditModal', {
+                rowKey: item?.rowKey,
+                productName: item?.productName,
+                nameNumber: item?.nameNumber || '(empty)',
+                hasNameNumberField: item?.hasNameNumberField,
+                playerLastName: item?.playerLastName || '(empty)',
+                hasPlayerLastNameField: item?.hasPlayerLastNameField,
+                color: item?.color,
+                colorLabel: item?.colorLabel,
+                colorHex: item?.colorHex || '(no hex)',
+                colors: (item?.optionSets?.colors || []).map(c => `${c.value}::${c.label}::${c.color || ''}`),
+                hasSizeOptions: item?.optionSets?.hasSizeOptions,
+                hasColorOptions: item?.optionSets?.hasColorOptions
+            })
             const mergedItem = buildMergedItem(item)
             currentRow = item
             originalSize = mergedItem.size || ''
@@ -1501,12 +1502,6 @@
                         ? !areDraftPatchesEqual(previousPatch, nextPatch)
                         : !!previousPatch
 
-                log('modal save clicked', {
-                    rowKey,
-                    patch,
-                    changedKeys: Object.keys(patch),
-                    didDraftStateChange
-                })
                 if (nextPatch) {
                     draftByRowKey.set(rowKey, nextPatch)
                 } else {
@@ -1808,12 +1803,6 @@
         })
 
         saveButton.addEventListener('click', () => {
-            log('save button clicked', {
-                disabled: saveButton.hasAttribute('disabled'),
-                lockedEditing,
-                isAdminMode: hostInit.isAdminMode,
-                hasState: !!uiState
-            })
             if (saveButton.hasAttribute('disabled')) return
             if (lockedEditing) return
             if (!uiState || !Array.isArray(uiState.items)) return
@@ -1933,7 +1922,6 @@
         })
 
         authSubmitBtn.addEventListener('click', () => {
-            log('verify button clicked')
             if (authSubmitBtn.hasAttribute('disabled')) return;
 
             authErrorMsg.classList.add('hidden');
@@ -1943,10 +1931,6 @@
 
             if (authMode === 'admin-code') {
                 const adminCodeVal = authAdminCode.value.trim();
-                log('admin auth form values', {
-                    hasAdminCode: !!adminCodeVal,
-                    hostOrderId: hostInit.orderId
-                })
 
                 if (adminCodeVal === '') {
                     authAdminCode.classList.add('border-red-500', 'focus:border-red-500', 'focus:ring-red-500');
@@ -1954,20 +1938,12 @@
                 }
 
                 startAdminAuthLoading()
-
-                log('sending TW_AUTH_SUBMIT admin-code')
                 postToHost({ type: HOST_TYPES.AUTH_SUBMIT, mode: 'admin-code', adminCode: adminCodeVal })
                 return
             }
 
             const orderVal = authOrderNumber.value.trim();
             const emailVal = authEmail.value.trim();
-            log('auth form values', {
-                orderNumberLength: orderVal.length,
-                email: maskEmail(emailVal),
-                hostOrderId: hostInit.orderId,
-                isAdminMode: hostInit.isAdminMode
-            })
             // Basic validation for empty fields
             let hasError = false;
             if(orderVal === '') {
@@ -1987,7 +1963,6 @@
             authBtnText.classList.add('opacity-0');
             authBtnSpinner.classList.remove('hidden');
 
-            log('sending TW_AUTH_SUBMIT')
             postToHost({ type: HOST_TYPES.AUTH_SUBMIT, email: emailVal, orderNumber: orderVal })
         });
 
@@ -2011,11 +1986,9 @@
         window.addEventListener('message', (ev) => {
             const d = ev?.data || {}
             if (!d || typeof d !== 'object') return
-            log('<- host', d.type || '(no-type)', d)
 
             if (d.type === HOST_TYPES.INIT) {
                 hostInit = { orderId: d.orderId || '', isAdminMode: !!d.isAdminMode }
-                log('received TW_INIT', hostInit)
                 // admin mode: no auth modal
                 if (hostInit.isAdminMode) {
                     authModal.classList.add('hidden')
@@ -2030,7 +2003,6 @@
             }
 
             if (d.type === HOST_TYPES.SET_STATE) {
-                log('received TW_SET_STATE')
                 uiState = d.state || null
                 baseItemsByRowKey = new Map((uiState?.items || []).map(item => [item.rowKey, { ...item }]))
                 if (uiState) {
@@ -2057,7 +2029,6 @@
             }
 
             if (d.type === HOST_TYPES.AUTH_RESULT) {
-                log('received TW_AUTH_RESULT', { ok: !!d.ok, message: d.message || '' })
                 finishAuthLoadingWithDelay(() => {
                     if (!d.ok) {
                         if (awaitingStoredAdminLogin) {
@@ -2082,7 +2053,6 @@
             }
 
             if (d.type === HOST_TYPES.SAVE_RESULT) {
-                log('received TW_SAVE_RESULT', { ok: !!d.ok, message: d.message || '', newStatus: d.newStatus || '' })
                 if (d.ok) {
                     draftByRowKey = new Map()
                     refreshSaveButtonState()
@@ -2103,7 +2073,6 @@
             }
 
             if (d.type === HOST_TYPES.LOCK_EDITING) {
-                log('received TW_LOCK_EDITING', { locked: !!d.locked, reason: d.reason || '' })
                 lockedByHost = !!d.locked
                 syncEditingLockState()
                 return
@@ -2111,7 +2080,6 @@
 
             if (d.type === 'TW_MESSAGE_RESULT') {
                 if (!d.ok) {
-                    log('message send failed', { message: d.message || '' })
                     if (messagesLockedHint) {
                         messagesLockedHint.textContent = String(d.message || 'Failed to send message.')
                         messagesLockedHint.classList.remove('hidden')
@@ -2136,7 +2104,6 @@
 
         // In case the host missed our initial ready, ask for state soon
         setTimeout(() => {
-            log('sending TW_REQUEST_STATE fallback')
             postToHost({ type: HOST_TYPES.REQUEST_STATE })
         }, 300)
 
